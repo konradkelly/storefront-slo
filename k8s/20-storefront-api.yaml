@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront-api
+  namespace: storefront
+spec:
+  # Start at 1 so only one pod seeds the catalog. Scale up later as an experiment.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storefront-api
+  template:
+    metadata:
+      labels:
+        app: storefront-api
+    spec:
+      containers:
+        - name: storefront-api
+          image: storefront-api:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_URL
+              value: jdbc:postgresql://postgres:5432/storefront
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: storefront-db
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: storefront-db
+                  key: POSTGRES_PASSWORD
+            - name: PAYMENT_FAILURE_RATE
+              value: "0.02"
+            - name: PAYMENT_LATENCY_MS
+              value: "150"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storefront-api
+  namespace: storefront
+  labels:
+    app: storefront-api
+spec:
+  selector:
+    app: storefront-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

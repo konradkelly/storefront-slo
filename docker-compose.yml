@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: storefront
+      POSTGRES_USER: storefront
+      POSTGRES_PASSWORD: storefront
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U storefront -d storefront"]
+      interval: 5s
+      retries: 10
+
+  storefront-api:
+    build: ./app
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/storefront
+      DB_USER: storefront
+      DB_PASSWORD: storefront
+      PAYMENT_FAILURE_RATE: "0.02"
+      PAYMENT_LATENCY_MS: "150"
+      RESTOCK_INTERVAL_MS: ${RESTOCK_INTERVAL_MS:-60000}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - storefront-api
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  k6:
+    image: grafana/k6:latest
+    profiles: ["load"]
+    command: run /scripts/checkout.js
+    environment:
+      BASE_URL: http://storefront-api:8080
+      DURATION: 15m
+    volumes:
+      - ./loadtest:/scripts:ro
+    depends_on:
+      - storefront-api      
+    
