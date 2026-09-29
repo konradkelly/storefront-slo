@@ -31,7 +31,7 @@ Custom (see `StorefrontMetrics.java`):
 
 | Prometheus name                         | Type      | Labels    |
 |-----------------------------------------|-----------|-----------|
-| `storefront_orders_created_total`             | counter   | `status`: success, payment_failed, out_of_stock |
+| `storefront_checkouts_total`                  | counter   | `status`: success, payment_failed, out_of_stock |
 | `storefront_cart_items_added_total`           | counter   |           |
 | `storefront_order_value_dollars_sum/_count`   | summary   |           |
 | `storefront_payment_duration_seconds_bucket`  | histogram | `outcome` |
@@ -91,8 +91,8 @@ Starter queries (paste into Grafana panels):
 |-----------------------------|--------|
 | Requests/sec by endpoint    | `sum by (uri) (rate(http_server_requests_seconds_count{application="storefront-api"}[1m]))` |
 | p95 checkout latency        | `histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{uri="/orders",method="POST"}[5m])))` |
-| Checkout outcomes/sec       | `sum by (status) (rate(storefront_orders_created_total[1m]))` |
-| Checkout failure ratio      | `sum(rate(storefront_orders_created_total{status!="success"}[5m])) / sum(rate(storefront_orders_created_total[5m]))` |
+| Checkout outcomes/sec       | `sum by (status) (rate(storefront_checkouts_total[1m]))` |
+| Checkout failure ratio      | `sum(rate(storefront_checkouts_total{status!="success"}[5m])) / sum(rate(storefront_checkouts_total[5m]))` |
 | Revenue per minute          | `sum(rate(storefront_order_value_dollars_sum[5m])) * 60` |
 | Average order value         | `sum(rate(storefront_order_value_dollars_sum[5m])) / sum(rate(storefront_order_value_dollars_count[5m]))` |
 | p95 payment latency         | `histogram_quantile(0.95, sum by (le) (rate(storefront_payment_duration_seconds_bucket[5m])))` |

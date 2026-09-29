@@ -35,7 +35,7 @@ public class Catalog implements CommandLineRunner {
                 new Product("Camp Mug", 1899, restockLevel)));
     }
 
-    @Scheduled(fixedRateString = "${shop.restock-interval-ms}", initialDelayString = "${shop.restock-interval-ms}")
+    @Scheduled(fixedRateString = "${storefront.restock-interval-ms}", initialDelayString = "${storefront.restock-interval-ms}")
     public void restock() {
         for (Long id : products.findAllIdsOrdered()) {
             products.restockOne(id, restockLevel);

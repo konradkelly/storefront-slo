@@ -11,9 +11,9 @@ spec:
       rules:
         - alert: StorefrontCheckoutFailureRateHigh
           expr: |
-            sum(rate(storefront_orders_created_total{status!="success"}[5m]))
+            sum(rate(storefront_checkouts_total{status!="success"}[5m]))
               /
-            sum(rate(storefront_orders_created_total[5m]))
+            sum(rate(storefront_checkouts_total[5m]))
               > 0.05
           for: 5m
           labels:

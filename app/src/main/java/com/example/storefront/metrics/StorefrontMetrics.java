@@ -12,7 +12,7 @@ import java.util.List;
  * All custom business metrics live here so names and labels stay consistent.
  *
  * Prometheus names after Micrometer converts them:
- *   storefront_orders_created_total{status}
+ *   storefront_checkouts_total{status}
  *   storefront_cart_items_added_total
  *   storefront_order_value_dollars_sum / _count / _max
  *   storefront_payment_duration_seconds_bucket{outcome}
@@ -43,7 +43,7 @@ public class StorefrontMetrics {
     }
 
     private Counter ordersCounter(String status) {
-        return Counter.builder("storefront.orders.created")
+        return Counter.builder("storefront.checkouts")
                 .description("Checkout attempts by result")
                 .tag("status", status)
                 .register(registry);
