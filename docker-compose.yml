@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16.14
     environment:
       POSTGRES_DB: storefront
       POSTGRES_USER: storefront
@@ -28,7 +28,7 @@ services:
         condition: service_healthy
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.15.0
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -37,18 +37,19 @@ services:
       - storefront-api
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.2
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
     depends_on:
       - prometheus
 
   k6:
-    image: grafana/k6:latest
+    image: grafana/k6:2.3.0
     profiles: ["load"]
     command: run /scripts/checkout.js
     environment:

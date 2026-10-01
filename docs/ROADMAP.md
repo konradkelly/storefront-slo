@@ -27,21 +27,27 @@ The EKS sprint then replaces those pieces one at a time.
 
 Small items that later phases depend on.
 
-- [ ] **Fix the leftover property name.** `Catalog.java` schedules restocks with
+- [x] **Fix the leftover property name.** `Catalog.java` schedules restocks with
       `${shop.restock-interval-ms}`, but `application.yml` defines `storefront.restock-interval-ms`.
       Spring can't resolve the placeholder, so a fresh build fails on startup.
-- [ ] **Add tests.** Add `@SpringBootTest` with Testcontainers Postgres for checkout: success, empty cart,
+- [x] **Add tests.** Add `@SpringBootTest` with Testcontainers Postgres for checkout: success, empty cart,
       out of stock, and payment failure. Also assert that the right `storefront_checkouts_total` series moves.
       CI in Phase 3 needs these tests.
-- [ ] **Pin image tags.** Replace `prom/prometheus:latest`, `grafana/grafana:latest`, and `grafana/k6:latest`
+- [x] **Pin image tags.** Replace `prom/prometheus:latest`, `grafana/grafana:latest`, and `grafana/k6:latest`
       with specific versions so the environment can be reproduced.
-- [ ] **Commit the Grafana dashboard** from README Step 3 as JSON. On kind, provision it through a ConfigMap
+- [x] **Commit the Grafana dashboard** from README Step 3 as JSON. On kind, provision it through a ConfigMap
       labeled `grafana_dashboard: "1"`, which the kube-prometheus-stack sidecar picks up.
-- [ ] **Run the container as non-root.** Add a `USER` to the runtime stage of the Dockerfile.
+- [x] **Run the container as non-root.** Add a `USER` to the runtime stage of the Dockerfile.
       Phase 2's Pod Security settings will require it.
 
 **Done when:** `mvn verify` passes, and a clean `docker compose up --build` serves orders and shows the
-dashboard without any manual steps.
+dashboard without any manual steps. **Done 2026-09-30.**
+
+Notes from finishing it:
+- Docker Engine 29 rejects the API version Testcontainers' client sends by default, so the Surefire config sets
+  `api.version=1.44`.
+- The checkout test suite includes a scrape test that fails if a documented metric name stops matching
+  what Prometheus actually sees.
 
 ---
 
@@ -76,6 +82,12 @@ Things to decide and write down:
   ```yaml
   management.metrics.distribution.slo.http.server.requests: 100ms,300ms,500ms,1s
   ```
+- **Measure the baseline before picking targets.** At the end of Phase 0, 5 k6 users with no fault injected
+  produced p50 checkout latency of 0.22s, but only about 75% of checkouts finished under 0.5s (max 3.2s).
+  The cause is row locks, not the connection pool: each checkout holds locks on product stock rows through
+  the payment call, and with only 8 products, concurrent carts queue behind each other. A 99%-under-500ms
+  SLO would be failing before any experiment, and the existing p95 > 1s alert fires at baseline. Either set
+  the first target from the measured baseline, or treat fixing this (Phase 5) as the first error-budget story.
 - **Window on a lab cluster.** A kind cluster never accumulates 28 days of data. Keep 28d in the spec,
   and add a 1d dashboard view so budget consumption is visible during an afternoon of experiments.
 

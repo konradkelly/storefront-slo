@@ -50,6 +50,19 @@ curl -s localhost:8080/actuator/prometheus | grep storefront_
 Read the raw `/actuator/prometheus` output before moving on. Knowing what a counter,
 histogram bucket, and `_sum`/`_count` pair look like makes PromQL much easier.
 
+Prometheus is on `localhost:9090`, and Grafana is on `localhost:3000` (admin/admin) with the
+**Storefront > Storefront API** dashboard already provisioned. To put traffic on it:
+
+```bash
+docker compose --profile load run --rm k6
+```
+
+Tests run the app against a real Postgres through Testcontainers, so Docker must be running:
+
+```bash
+cd app && mvn verify
+```
+
 ## Step 2: deploy to kind
 
 ```bash
@@ -66,6 +79,10 @@ kubectl apply -f k8s/00-namespace.yaml -f k8s/10-postgres.yaml
 kubectl -n storefront rollout status deploy/postgres
 kubectl apply -f k8s/20-storefront-api.yaml -f k8s/30-servicemonitor.yaml -f k8s/40-prometheusrule.yaml
 kubectl -n storefront rollout status deploy/storefront-api
+
+# The kube-prometheus-stack Grafana sidecar loads ConfigMaps labeled grafana_dashboard=1.
+kubectl -n monitoring create configmap storefront-dashboard --from-file=grafana/dashboards/storefront.json
+kubectl -n monitoring label configmap storefront-dashboard grafana_dashboard=1
 
 kubectl -n storefront create configmap k6-script --from-file=loadtest/checkout.js
 kubectl apply -f k8s/50-k6-job.yaml
@@ -85,7 +102,8 @@ the `release: kps` label on the ServiceMonitor is the first thing to check.
 
 ## Step 3: build the dashboard yourself
 
-Starter queries (paste into Grafana panels):
+A finished version lives in `grafana/dashboards/storefront.json`, but building the panels yourself is
+the fastest way to learn PromQL. Starter queries (paste into Grafana panels):
 
 | Panel                       | PromQL |
 |-----------------------------|--------|
@@ -99,7 +117,7 @@ Starter queries (paste into Grafana panels):
 | DB pool active / pending    | `hikaricp_connections_active` and `hikaricp_connections_pending` |
 | Pod restarts                | `kube_pod_container_status_restarts_total{namespace="storefront"}` |
 
-When the dashboard looks right, export its JSON and commit it to the repo.
+When your dashboard looks right, compare it with the committed one.
 
 ## Step 4: experiments
 

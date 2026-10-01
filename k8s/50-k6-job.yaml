@@ -12,7 +12,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: k6
-          image: grafana/k6:latest
+          image: grafana/k6:2.3.0
           args: ["run", "/scripts/checkout.js"]
           env:
             - name: BASE_URL
