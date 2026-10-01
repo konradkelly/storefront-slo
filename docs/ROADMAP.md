@@ -82,12 +82,19 @@ Things to decide and write down:
   ```yaml
   management.metrics.distribution.slo.http.server.requests: 100ms,300ms,500ms,1s
   ```
-- **Measure the baseline before picking targets.** At the end of Phase 0, 5 k6 users with no fault injected
-  produced p50 checkout latency of 0.22s, but only about 75% of checkouts finished under 0.5s (max 3.2s).
-  The cause is row locks, not the connection pool: each checkout holds locks on product stock rows through
-  the payment call, and with only 8 products, concurrent carts queue behind each other. A 99%-under-500ms
-  SLO would be failing before any experiment, and the existing p95 > 1s alert fires at baseline. Either set
-  the first target from the measured baseline, or treat fixing this (Phase 5) as the first error-budget story.
+- **Measure the baseline before picking targets, after a warm-up.** The first run on a fresh database and
+  JVM in Phase 0 showed only 75% of checkouts under 0.5s. That didn't reproduce on a warm app, so
+  exclude warm-up from baselines. Under real contention the checkout design does matter. Measured on
+  2026-10-01, with 30 k6 users for 2 minutes after a warm-up and 150ms payment latency:
+
+  | Checkout | p95 | p99 | max | under 0.5s |
+  |----------|-----|-----|-----|------------|
+  | `CHECKOUT_MODE=single-tx` (payment inside the transaction) | 0.52s | 0.78s | 2.0s | 95.6% |
+  | `CHECKOUT_MODE=saga` (default since 2026-10-01) | 0.24s | 0.25s | 0.43s | 100% |
+
+  The cause was row locks, not the connection pool (pending stayed at 0 in both). This gives Phase 1 a
+  ready-made story: define the latency SLO, show single-tx burning budget at 30 users, switch to saga,
+  and show the burn rate drop.
 - **Window on a lab cluster.** A kind cluster never accumulates 28 days of data. Keep 28d in the spec,
   and add a 1d dashboard view so budget consumption is visible during an afternoon of experiments.
 
@@ -292,9 +299,8 @@ Pick items based on interest.
   checkout latency histogram links to the trace that caused it.
 - **Logs:** Structured JSON logs with trace IDs, shipped to Loki. Wire up one-click navigation from dashboard
   to trace to logs.
-- **Fix the deliberate design flaw:** `OrderService` calls payment while holding a DB transaction.
-  Measure the pool saturation first, then restructure (reserve stock → commit → charge → confirm or compensate)
-  and show the before/after on the dashboard.
+- ~~**Fix the deliberate design flaw.**~~ Done early, on 2026-10-01: `CHECKOUT_MODE=saga` reserves, charges,
+  then settles or compensates. The old path is kept as `single-tx` for comparison. See Phase 1.1 for the numbers.
 - **Resilience:** Resilience4j timeouts, retries with backoff, and a circuit breaker on the payment client,
   each measured against the SLOs.
 - **Chaos engineering:** Replace the manual `set env` experiments with **Chaos Mesh** experiments (pod kill,

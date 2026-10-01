@@ -14,6 +14,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("update Product p set p.stock = p.stock - :qty where p.id = :id and p.stock >= :qty")
     int decrementStock(@Param("id") Long id, @Param("qty") int qty);
 
+    /** Returns stock taken by a reservation that will not be paid for. */
+    @Modifying
+    @Query("update Product p set p.stock = p.stock + :qty where p.id = :id")
+    int returnStock(@Param("id") Long id, @Param("qty") int qty);
+
     @Query("select p.id from Product p order by p.id")
     List<Long> findAllIdsOrdered();
 

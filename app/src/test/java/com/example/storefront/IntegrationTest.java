@@ -27,7 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "storefront.payment.latency-ms=0",
         "storefront.restock-level=50",
         // Keep the restocker out of the way so stock assertions are stable.
-        "storefront.restock-interval-ms=3600000"})
+        "storefront.restock-interval-ms=3600000",
+        "storefront.reservation-sweep-interval-ms=3600000"})
 @AutoConfigureObservability
 public abstract class IntegrationTest {
 

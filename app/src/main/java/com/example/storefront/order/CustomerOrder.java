@@ -1,6 +1,8 @@
 package com.example.storefront.order;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -18,13 +20,16 @@ public class CustomerOrder {
     private String cartId;
     private long totalCents;
     private Instant createdAt;
+    @Enumerated(EnumType.STRING)
+    private OrderStatus status;
 
     protected CustomerOrder() {
     }
 
-    public CustomerOrder(String cartId, long totalCents) {
+    public CustomerOrder(String cartId, long totalCents, OrderStatus status) {
         this.cartId = cartId;
         this.totalCents = totalCents;
+        this.status = status;
         this.createdAt = Instant.now();
     }
 
@@ -32,4 +37,5 @@ public class CustomerOrder {
     public String getCartId() { return cartId; }
     public long getTotalCents() { return totalCents; }
     public Instant getCreatedAt() { return createdAt; }
+    public OrderStatus getStatus() { return status; }
 }

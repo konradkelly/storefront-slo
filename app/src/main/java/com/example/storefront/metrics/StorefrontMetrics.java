@@ -14,6 +14,7 @@ import java.util.List;
  * Prometheus names after Micrometer converts them:
  *   storefront_checkouts_total{status}
  *   storefront_cart_items_added_total
+ *   storefront_reservations_expired_total
  *   storefront_order_value_dollars_sum / _count / _max
  *   storefront_payment_duration_seconds_bucket{outcome}
  *
@@ -26,12 +27,16 @@ public class StorefrontMetrics {
 
     private final MeterRegistry registry;
     private final Counter cartItemsAdded;
+    private final Counter reservationsExpired;
     private final DistributionSummary orderValue;
 
     public StorefrontMetrics(MeterRegistry registry) {
         this.registry = registry;
         this.cartItemsAdded = Counter.builder("storefront.cart.items.added")
                 .description("Items added to carts")
+                .register(registry);
+        this.reservationsExpired = Counter.builder("storefront.reservations.expired")
+                .description("Stock reservations released because checkout never finished")
                 .register(registry);
         this.orderValue = DistributionSummary.builder("storefront.order.value")
                 .baseUnit("dollars")
@@ -55,6 +60,10 @@ public class StorefrontMetrics {
 
     public void cartItemAdded() {
         cartItemsAdded.increment();
+    }
+
+    public void reservationExpired() {
+        reservationsExpired.increment();
     }
 
     public void recordOrderValue(long totalCents) {

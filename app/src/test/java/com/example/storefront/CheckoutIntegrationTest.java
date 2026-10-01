@@ -25,6 +25,7 @@ class CheckoutIntegrationTest extends IntegrationTest {
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(res.getBody().get("totalCents").asLong()).isEqualTo(price * 2);
+        assertThat(res.getBody().get("status").asText()).isEqualTo("PAID");
         assertThat(stockOf(productId)).isEqualTo(stockBefore - 2);
         assertThat(cart(cartId)).isEmpty();
         assertThat(checkouts("success")).isEqualTo(successBefore + 1);
@@ -74,6 +75,7 @@ class CheckoutIntegrationTest extends IntegrationTest {
         assertThat(scrape).contains(
                 "storefront_checkouts_total{",
                 "storefront_cart_items_added_total{",
+                "storefront_reservations_expired_total{",
                 "storefront_order_value_dollars_sum{",
                 "storefront_order_value_dollars_count{",
                 "storefront_payment_duration_seconds_bucket{",

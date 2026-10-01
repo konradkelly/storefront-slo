@@ -20,6 +20,7 @@ services:
       DB_PASSWORD: storefront
       PAYMENT_FAILURE_RATE: "0.02"
       PAYMENT_LATENCY_MS: "150"
+      CHECKOUT_MODE: ${CHECKOUT_MODE:-saga}
       RESTOCK_INTERVAL_MS: ${RESTOCK_INTERVAL_MS:-60000}
     ports:
       - "8080:8080"

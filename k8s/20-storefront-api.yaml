@@ -38,6 +38,8 @@ spec:
               value: "0.02"
             - name: PAYMENT_LATENCY_MS
               value: "150"
+            - name: CHECKOUT_MODE
+              value: saga
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness

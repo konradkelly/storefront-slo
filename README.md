@@ -35,6 +35,7 @@ Custom (see `StorefrontMetrics.java`):
 | `storefront_cart_items_added_total`           | counter   |           |
 | `storefront_order_value_dollars_sum/_count`   | summary   |           |
 | `storefront_payment_duration_seconds_bucket`  | histogram | `outcome` |
+| `storefront_reservations_expired_total`       | counter   | (stock reservations released because checkout never finished) |
 
 ## Step 1: run locally with Docker Compose
 
@@ -125,9 +126,15 @@ Each `set env` triggers a rollout. Predict what you'll see before running it.
 
 1. **Payment outage.** `kubectl -n storefront set env deploy/storefront-api PAYMENT_FAILURE_RATE=0.3`
    The failure ratio jumps; `StorefrontCheckoutFailureRateHigh` goes Pending, then Firing after 5 minutes.
-2. **Slow provider.** `kubectl -n storefront set env deploy/storefront-api PAYMENT_LATENCY_MS=1500`
-   Checkout p95 climbs. Because the payment call happens inside the DB transaction,
-   `hikaricp_connections_pending` rises too. Explaining why is a great interview answer.
+2. **Slow provider, two checkout designs.** `kubectl -n storefront set env deploy/storefront-api PAYMENT_LATENCY_MS=1500`
+   Checkout p95 climbs with payment latency. Now repeat with `CHECKOUT_MODE=single-tx`, which calls
+   payment inside the DB transaction. Each checkout keeps its product rows locked for the whole payment,
+   so carts sharing a product queue behind each other, and checkout latency grows well past payment latency.
+   The default `saga` mode reserves stock, commits, charges, then settles or returns the stock, so locks
+   last milliseconds. Explaining the difference is a great interview answer. In Compose:
+   `CHECKOUT_MODE=single-tx docker compose up -d storefront-api`. Then load it with
+   `docker compose --profile load run --rm --no-deps -e VUS=30 k6`. Without `--no-deps`, `run` recreates
+   the API with the default mode.
 3. **Stockouts.** `kubectl -n storefront set env deploy/storefront-api RESTOCK_LEVEL=20`
    The `out_of_stock` series grows between restocks.
 4. **Scale out.** `kubectl -n storefront scale deploy/storefront-api --replicas=3`
@@ -135,7 +142,7 @@ Each `set env` triggers a rollout. Predict what you'll see before running it.
 5. **Kill a pod.** `kubectl -n storefront delete pod -l app=storefront-api --wait=false`
    Look for the gap in the graphs and the scrape target going down.
 
-Reset with `PAYMENT_FAILURE_RATE=0.02 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200`.
+Reset with `PAYMENT_FAILURE_RATE=0.02 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 CHECKOUT_MODE=saga`.
 
 ## Known shortcuts (fine for learning, not for production)
 
