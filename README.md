@@ -56,7 +56,10 @@ Read the raw `/actuator/prometheus` output before moving on. Knowing what a coun
 histogram bucket, and `_sum`/`_count` pair look like makes PromQL much easier.
 
 Prometheus is on `localhost:9090`, and Grafana is on `localhost:3000` (admin/admin) with the
-**Storefront > Storefront API** dashboard already provisioned. Alertmanager is on `localhost:9093`. It routes
+**Storefront > Storefront API** and **Storefront > Storefront SLOs** dashboards already provisioned. On the SLO
+dashboard, set **Budget window** to `1d` in the lab, because a laptop never accumulates 28 days of data. If you edit
+a dashboard JSON on Windows, run `docker compose restart grafana`: file changes don't reach the container
+through the bind mount, so Grafana never sees them otherwise. Alertmanager is on `localhost:9093`. It routes
 `severity=page` to Slack `#alerts-page` and `severity=ticket` to `#alerts-ticket` (setup:
 [alertmanager/secrets/README.md](alertmanager/secrets/README.md)). It also sends every notification to a local
 logger, so you can follow routing without Slack:
@@ -106,7 +109,7 @@ kubectl apply -f k8s/20-storefront-api.yaml -f k8s/30-servicemonitor.yaml \
 kubectl -n storefront rollout status deploy/storefront-api
 
 # The kube-prometheus-stack Grafana sidecar loads ConfigMaps labeled grafana_dashboard=1.
-kubectl -n monitoring create configmap storefront-dashboard --from-file=grafana/dashboards/storefront.json
+kubectl -n monitoring create configmap storefront-dashboard \n  --from-file=grafana/dashboards/storefront.json --from-file=grafana/dashboards/slo.json
 kubectl -n monitoring label configmap storefront-dashboard grafana_dashboard=1
 
 kubectl -n storefront create configmap k6-script --from-file=loadtest/checkout.js

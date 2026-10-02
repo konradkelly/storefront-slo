@@ -162,8 +162,12 @@ Based on the Google SRE Workbook, "Alerting on SLOs". For a 28d window:
 
 ### 1.5 SLO dashboard
 
-- [ ] Add a Grafana dashboard with, per SLO: current SLI, budget remaining, burn rate for each window,
+- [x] Add a Grafana dashboard with, per SLO: current SLI, budget remaining, burn rate for each window,
       and an annotation for every alert that fired.
+      Done 2026-10-02: `grafana/dashboards/slo.json` ("Storefront SLOs"). A row repeats per SLO with the SLI vs.
+      objective, budget remaining (status color plus trend), burn rate now for all 7 windows, and burn rate over
+      time for the page pairs (same color = same pair, dashed = short window, threshold lines at 6x and 14.4x).
+      `ALERTS` annotations mark pages and tickets. A `Budget window` variable switches 28d/1d for the lab.
 
 **Done when:** `promtool test rules` has unit tests proving each burn-rate alert fires (and stays quiet) on
 synthetic series, and the SLO dashboard is committed.
