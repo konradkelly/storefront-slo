@@ -1,0 +1,338 @@
+# SLO recording rules. Definitions and reasoning: docs/slo.md.
+#
+# Source of truth for both environments:
+#   - Docker Compose loads this file directly (prometheus/prometheus.yml).
+#   - kind gets k8s/41-slo-rules.yaml, generated from this file by scripts/gen-k8s-rules.sh.
+#
+# Per SLO:
+#   slo:<name>:objective                 the target, e.g. 0.995
+#   slo:<name>:error_ratio_rate<window>  bad / valid over the window. Burn-rate alerts (Phase 1.3) divide
+#                                        this by (1 - objective).
+#   slo:<name>:error_budget_remaining    share of the 28d budget left. 1 = untouched, 0 = spent, < 0 = overspent.
+#
+# A window with no valid traffic gives NaN (0/0), not 0. That's deliberate: no traffic is not "0% errors",
+# and NaN never satisfies an alert comparison.
+#
+# The 3d and 28d windows read days of raw samples on every evaluation. That's fine at lab scale. At real
+# scale you'd derive them from the 5m series instead (Sloth does this), trading exactness for cost.
+groups:
+  - name: slo-checkout-availability
+    interval: 30s
+    rules:
+      # Checkouts that failed because of us (5xx or payment_failed). 400 and 409 are excluded.
+      - record: slo:checkout_availability:objective
+        expr: vector(0.995)
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate5m
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[5m])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[5m])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[5m]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate30m
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[30m])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[30m])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[30m]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate1h
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[1h])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[1h])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[1h]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate2h
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[2h])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[2h])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[2h]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate6h
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[6h])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[6h])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[6h]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate1d
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[1d])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[1d])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[1d]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate3d
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[3d])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[3d])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[3d]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_ratio_rate28d
+        expr: |
+          (
+            (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[28d])) or vector(0))
+            +
+            (sum(rate(storefront_checkouts_total{application="storefront-api", status="payment_failed"}[28d])) or vector(0))
+          )
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[28d]))
+        labels:
+          slo: checkout-availability
+      - record: slo:checkout_availability:error_budget_remaining
+        expr: 1 - slo:checkout_availability:error_ratio_rate28d / (1 - slo:checkout_availability:objective)
+        labels:
+          slo: checkout-availability
+  - name: slo-checkout-latency
+    interval: 30s
+    rules:
+      # Checkouts slower than 500ms. 400s are excluded.
+      - record: slo:checkout_latency:objective
+        expr: vector(0.99)
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate5m
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[5m]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[5m]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate30m
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[30m]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[30m]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate1h
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[1h]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[1h]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate2h
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[2h]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[2h]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate6h
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[6h]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[6h]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate1d
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[1d]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[1d]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate3d
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[3d]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[3d]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_ratio_rate28d
+        expr: |
+          1 - (
+            sum(rate(http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status!="400", le="0.5"}[28d]))
+            /
+            sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!="400"}[28d]))
+          )
+        labels:
+          slo: checkout-latency
+      - record: slo:checkout_latency:error_budget_remaining
+        expr: 1 - slo:checkout_latency:error_ratio_rate28d / (1 - slo:checkout_latency:objective)
+        labels:
+          slo: checkout-latency
+  - name: slo-catalog-availability
+    interval: 30s
+    rules:
+      # 5xx responses on /products*.
+      - record: slo:catalog_availability:objective
+        expr: vector(0.999)
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate5m
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[5m])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[5m]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate30m
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[30m])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[30m]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate1h
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[1h])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[1h]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate2h
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[2h])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[2h]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate6h
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[6h])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[6h]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate1d
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[1d])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[1d]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate3d
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[3d])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[3d]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_ratio_rate28d
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[28d])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[28d]))
+        labels:
+          slo: catalog-availability
+      - record: slo:catalog_availability:error_budget_remaining
+        expr: 1 - slo:catalog_availability:error_ratio_rate28d / (1 - slo:catalog_availability:objective)
+        labels:
+          slo: catalog-availability
+  - name: slo-cart-availability
+    interval: 30s
+    rules:
+      # 5xx responses on /cart/**.
+      - record: slo:cart_availability:objective
+        expr: vector(0.999)
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate5m
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[5m])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[5m]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate30m
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[30m])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[30m]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate1h
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[1h])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[1h]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate2h
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[2h])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[2h]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate6h
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[6h])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[6h]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate1d
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[1d])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[1d]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate3d
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[3d])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[3d]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_ratio_rate28d
+        expr: |
+          (sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*", status=~"5.."}[28d])) or vector(0))
+          /
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/cart/.*"}[28d]))
+        labels:
+          slo: cart-availability
+      - record: slo:cart_availability:error_budget_remaining
+        expr: 1 - slo:cart_availability:error_ratio_rate28d / (1 - slo:cart_availability:objective)
+        labels:
+          slo: cart-availability

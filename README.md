@@ -8,8 +8,12 @@ rate lets you break things on purpose and watch the dashboards and alerts react.
 
 ```
 app/          Spring Boot API (products, cart, checkout, fake payments)
-k8s/          kind config, Postgres, API, ServiceMonitor, alert rules, k6 load Job
-loadtest/     k6 script that browses, adds to cart, and checks out
+k8s/          kind config, Postgres, API, ServiceMonitor, SLO rules and alerts, k6 load Job
+prometheus/   Compose scrape config, SLO recording rules, burn-rate alerts, promtool tests
+alertmanager/ routing, inhibition, Slack template, local webhook logger (secrets are gitignored)
+scripts/      gen-k8s-rules.sh: wraps the SLO rules and alerts into PrometheusRules for kind
+loadtest/     k6 script: realistic browsing (default) or checkout-heavy stress
+docs/         SLO spec, runbooks, postmortem template, roadmap, architecture notes
 ```
 
 ## API
@@ -52,7 +56,16 @@ Read the raw `/actuator/prometheus` output before moving on. Knowing what a coun
 histogram bucket, and `_sum`/`_count` pair look like makes PromQL much easier.
 
 Prometheus is on `localhost:9090`, and Grafana is on `localhost:3000` (admin/admin) with the
-**Storefront > Storefront API** dashboard already provisioned. To put traffic on it:
+**Storefront > Storefront API** dashboard already provisioned. Alertmanager is on `localhost:9093`. It routes
+`severity=page` to Slack `#alerts-page` and `severity=ticket` to `#alerts-ticket` (setup:
+[alertmanager/secrets/README.md](alertmanager/secrets/README.md)). It also sends every notification to a local
+logger, so you can follow routing without Slack:
+
+```bash
+docker compose logs -f alert-logger
+```
+
+Each alert links to its runbook in [docs/runbooks/](docs/runbooks/). To put traffic on it:
 
 ```bash
 docker compose --profile load run --rm k6
@@ -63,6 +76,16 @@ Tests run the app against a real Postgres through Testcontainers, so Docker must
 ```bash
 cd app && mvn verify
 ```
+
+The SLO recording rules and burn-rate alerts ([docs/slo.md](docs/slo.md)) live in `prometheus/rules/`. Compose
+loads them directly. After editing them, run the unit tests and regenerate the kind copies:
+
+```bash
+docker run --rm -v "$PWD/prometheus:/src" -w /src --entrypoint promtool prom/prometheus:v3.15.0 test rules tests/slo_test.yml tests/slo_alerts_test.yml
+sh scripts/gen-k8s-rules.sh
+```
+
+On Git Bash for Windows, prefix the `docker run` with `MSYS_NO_PATHCONV=1` and use `$(pwd -W)` in place of `$PWD`.
 
 ## Step 2: deploy to kind
 
@@ -78,7 +101,8 @@ kind load docker-image storefront-api:dev --name storefront
 
 kubectl apply -f k8s/00-namespace.yaml -f k8s/10-postgres.yaml
 kubectl -n storefront rollout status deploy/postgres
-kubectl apply -f k8s/20-storefront-api.yaml -f k8s/30-servicemonitor.yaml -f k8s/40-prometheusrule.yaml
+kubectl apply -f k8s/20-storefront-api.yaml -f k8s/30-servicemonitor.yaml \
+  -f k8s/41-slo-rules.yaml -f k8s/42-slo-alerts.yaml
 kubectl -n storefront rollout status deploy/storefront-api
 
 # The kube-prometheus-stack Grafana sidecar loads ConfigMaps labeled grafana_dashboard=1.
@@ -125,7 +149,10 @@ When your dashboard looks right, compare it with the committed one.
 Each `set env` triggers a rollout. Predict what you'll see before running it.
 
 1. **Payment outage.** `kubectl -n storefront set env deploy/storefront-api PAYMENT_FAILURE_RATE=0.3`
-   The failure ratio jumps; `StorefrontCheckoutFailureRateHigh` goes Pending, then Firing after 5 minutes.
+   The 5m burn rate jumps to about 60x right away, but `StorefrontCheckoutAvailabilityBudgetBurn` (severity page)
+   waits until the 1h window passes 14.4x as well, about 15 minutes in. Set it back to 0.001 within half an
+   hour and the page clears within about 5 minutes, because the 5m window recovers first. A longer outage also
+   trips the 6h/30m pair, which takes up to 30 minutes to clear. Watch it on Prometheus's Alerts page.
 2. **Slow provider, two checkout designs.** `kubectl -n storefront set env deploy/storefront-api PAYMENT_LATENCY_MS=1500`
    Checkout p95 climbs with payment latency. Now repeat with `CHECKOUT_MODE=single-tx`, which calls
    payment inside the DB transaction. Each checkout keeps its product rows locked for the whole payment,
@@ -133,8 +160,8 @@ Each `set env` triggers a rollout. Predict what you'll see before running it.
    The default `saga` mode reserves stock, commits, charges, then settles or returns the stock, so locks
    last milliseconds. Explaining the difference is a great interview answer. In Compose:
    `CHECKOUT_MODE=single-tx docker compose up -d storefront-api`. Then load it with
-   `docker compose --profile load run --rm --no-deps -e VUS=30 k6`. Without `--no-deps`, `run` recreates
-   the API with the default mode.
+   `docker compose --profile load run --rm --no-deps -e PROFILE=checkout-stress -e VUS=30 k6`. Without `--no-deps`, `run` recreates
+   the API with the default mode. Diagrams and trade-offs: [docs/architecture/checkout.md](docs/architecture/checkout.md).
 3. **Stockouts.** `kubectl -n storefront set env deploy/storefront-api RESTOCK_LEVEL=20`
    The `out_of_stock` series grows between restocks.
 4. **Scale out.** `kubectl -n storefront scale deploy/storefront-api --replicas=3`
@@ -142,7 +169,7 @@ Each `set env` triggers a rollout. Predict what you'll see before running it.
 5. **Kill a pod.** `kubectl -n storefront delete pod -l app=storefront-api --wait=false`
    Look for the gap in the graphs and the scrape target going down.
 
-Reset with `PAYMENT_FAILURE_RATE=0.02 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 CHECKOUT_MODE=saga`.
+Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 CHECKOUT_MODE=saga`.
 
 ## Known shortcuts (fine for learning, not for production)
 

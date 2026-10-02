@@ -1,0 +1,183 @@
+# Unit tests for prometheus/rules/slo-alerts.yml. Run from the repo root:
+#   docker run --rm -v "$PWD/prometheus:/src" -w /src --entrypoint promtool \
+#     prom/prometheus:v3.15.0 test rules tests/slo_alerts_test.yml
+#
+# Most scenarios start with 3 days (4320m) of healthy traffic. Without that history the 3d and 1d windows
+# would contain only the incident and overstate how much budget it spent.
+#
+# Series notation: 'a+bxn' is n+1 samples starting at a and adding b each 1m interval. Segments continue
+# where the previous one ended, so each new segment starts one step after the last value.
+rule_files:
+  - ../rules/slo.yml
+  - ../rules/slo-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Payment provider goes down for 30 minutes (30% of checkouts fail), then recovers.
+  # Outage minutes: 4321 to 4350. Traffic stays at 100 checkouts per minute throughout.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+100x4320 432070+70x29 434200+100x59'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="402"}'
+        values: '0+0x4320 30+30x29 900+0x59'
+      - series: 'storefront_checkouts_total{application="storefront-api", status="payment_failed"}'
+        values: '0+0x4320 30+30x29 900+0x59'
+    alert_rule_test:
+      # 10 minutes in: the 5m window is at 60x, but the 1h window is only at ~10x. Not enough budget is
+      # spent yet to wake someone up.
+      - eval_time: 4330m
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+      # 20 minutes in: the 1h window passes 14.4x as well. Page.
+      - eval_time: 4340m
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo: checkout-availability
+            exp_annotations:
+              summary: "Checkout availability is burning its error budget fast"
+              description: "Burning the 28-day error budget at 20.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutAvailabilityBudgetBurn.md"
+      # 10 minutes after recovery: the 1h window still reads ~15x, but the 5m window is clean, so the page
+      # clears. A single-window 1h alert would stay red for most of another hour.
+      - eval_time: 4360m
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+
+  # Slow burn: 2.5% of checkouts fail (5x), starting after 3 healthy days. The old "> 5% for 5m" threshold
+  # alert would never fire. This never pages either (needs > 6x), but a ticket opens after about 14.4 hours.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+200x4320 864195+195x959'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="402"}'
+        values: '0+0x4320 5+5x959'
+      - series: 'storefront_checkouts_total{application="storefront-api", status="payment_failed"}'
+        values: '0+0x4320 5+5x959'
+    alert_rule_test:
+      # 12 hours in: the 1d window is at 2.5x and the 3d window at 0.8x. Both are below their thresholds.
+      - eval_time: 5040m
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+      # 16 hours in: the 1d window passes 3x. Ticket, no page.
+      - eval_time: 5280m
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              slo: checkout-availability
+            exp_annotations:
+              summary: "Checkout availability is burning its error budget slowly"
+              description: "Burning the 28-day error budget at 3.3x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutAvailabilityBudgetBurn.md"
+
+  # A healthy system at the default 0.1% payment failure rate (0.2x) stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+999x4320'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="402"}'
+        values: '0+1x4320'
+      - series: 'storefront_checkouts_total{application="storefront-api", status="payment_failed"}'
+        values: '0+1x4320'
+    alert_rule_test:
+      - eval_time: 4320m
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+
+  # Sustained burns on the other three SLOs, from the start. Each alert's expression is wired to its own
+  # SLO. With no healthy history, the long windows agree with the short ones, so page and ticket fire
+  # together. That's why Alertmanager inhibits the ticket while the page fires (Phase 1.4).
+  - interval: 1m
+    input_series:
+      # Checkout latency: 30 of 100 checkouts over 500ms (30x).
+      - series: 'http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status="201", le="0.5"}'
+        values: '0+70x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+100x60'
+      # Catalog: 2% 5xx (20x).
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products/{id}", method="GET", status="200"}'
+        values: '0+98x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products/{id}", method="GET", status="500"}'
+        values: '0+2x60'
+      # Cart: 2% 5xx (20x).
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/cart/items", method="POST", status="201"}'
+        values: '0+98x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/cart/items", method="POST", status="503"}'
+        values: '0+2x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: StorefrontCheckoutLatencyBudgetBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: checkout-latency}
+            exp_annotations:
+              summary: "Checkout latency is burning its error budget fast"
+              description: "Burning the 28-day error budget at 30.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutLatencyBudgetBurn.md"
+          - exp_labels: {severity: ticket, slo: checkout-latency}
+            exp_annotations:
+              summary: "Checkout latency is burning its error budget slowly"
+              description: "Burning the 28-day error budget at 30.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutLatencyBudgetBurn.md"
+      - eval_time: 30m
+        alertname: StorefrontCatalogAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: catalog-availability}
+            exp_annotations:
+              summary: "Catalog availability is burning its error budget fast"
+              description: "Burning the 28-day error budget at 20.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCatalogAvailabilityBudgetBurn.md"
+          - exp_labels: {severity: ticket, slo: catalog-availability}
+            exp_annotations:
+              summary: "Catalog availability is burning its error budget slowly"
+              description: "Burning the 28-day error budget at 20.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCatalogAvailabilityBudgetBurn.md"
+      - eval_time: 30m
+        alertname: StorefrontCartAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: cart-availability}
+            exp_annotations:
+              summary: "Cart availability is burning its error budget fast"
+              description: "Burning the 28-day error budget at 20.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCartAvailabilityBudgetBurn.md"
+          - exp_labels: {severity: ticket, slo: cart-availability}
+            exp_annotations:
+              summary: "Cart availability is burning its error budget slowly"
+              description: "Burning the 28-day error budget at 20.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCartAvailabilityBudgetBurn.md"
+
+  # The app stops responding to scrapes at minute 11. Pending for 2 minutes, then firing.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="storefront-api", instance="storefront-api:8080"}'
+        values: '1+0x10 0+0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: StorefrontApiDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: StorefrontApiDown
+        exp_alerts:
+          - exp_labels: {severity: page}
+            exp_annotations:
+              summary: "No storefront-api instance is being scraped successfully"
+              description: "Prometheus can't scrape any storefront-api target. The SLO alerts can't see an outage like this."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontApiDown.md"
+
+  # The target disappears entirely (deployment deleted, ServiceMonitor broken): no up series at all.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="something-else", instance="x"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: StorefrontApiDown
+        exp_alerts:
+          - exp_labels: {severity: page, job: storefront-api}
+            exp_annotations:
+              summary: "No storefront-api instance is being scraped successfully"
+              description: "Prometheus can't scrape any storefront-api target. The SLO alerts can't see an outage like this."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontApiDown.md"

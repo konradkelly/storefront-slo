@@ -1,0 +1,65 @@
+# Alertmanager decides who hears about an alert, and how. Prometheus only decides that something is wrong.
+#
+#   severity=page   -> Slack #alerts-page   (wake someone up, re-notify hourly while it fires)
+#   severity=ticket -> Slack #alerts-ticket (look at it during work hours, re-notify daily)
+#
+# Every receiver also posts to alert-logger, a local webhook sink (alertmanager/webhook-logger.py), so routing
+# can be tested with `docker compose logs -f alert-logger` before Slack is set up, or without it.
+#
+# Slack webhook URLs are secrets. They're read from files in alertmanager/secrets/, which git ignores.
+# See alertmanager/secrets/README.md.
+
+global:
+  resolve_timeout: 5m
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  # Anything without a recognized severity goes to the quiet channel rather than being dropped.
+  receiver: ticket
+  # One notification per alert per SLO. A page for checkout availability and a page for cart availability
+  # stay separate, but repeated firings of the same one collapse into a single thread.
+  group_by: [alertname, slo]
+  group_wait: 30s       # wait this long after the first alert so related alerts arrive in one message
+  group_interval: 5m    # how often to send updates when alerts join or leave an existing group
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="page"]
+      receiver: page
+      group_wait: 10s
+      repeat_interval: 1h
+    - matchers: [severity="ticket"]
+      receiver: ticket
+      group_wait: 5m
+      repeat_interval: 24h
+
+inhibit_rules:
+  # A page and a ticket for the same SLO describe the same problem. While the page fires, mute the ticket.
+  - source_matchers: [severity="page"]
+    target_matchers: [severity="ticket"]
+    equal: [alertname, slo]
+  # If the app is down, every SLO burn alert is a symptom of that. Show the cause, not the symptoms.
+  - source_matchers: [alertname="StorefrontApiDown"]
+    target_matchers: [alertname=~"Storefront.*BudgetBurn"]
+
+receivers:
+  - name: page
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-page-url
+        send_resolved: true
+        title: '{{ template "storefront.slack.title" . }}'
+        text: '{{ template "storefront.slack.text" . }}'
+    webhook_configs:
+      - url: http://alert-logger:8080/page
+        send_resolved: true
+
+  - name: ticket
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-ticket-url
+        send_resolved: true
+        title: '{{ template "storefront.slack.title" . }}'
+        text: '{{ template "storefront.slack.text" . }}'
+    webhook_configs:
+      - url: http://alert-logger:8080/ticket
+        send_resolved: true

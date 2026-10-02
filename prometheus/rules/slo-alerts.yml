@@ -1,0 +1,191 @@
+# Multi-window, multi-burn-rate alerts for the SLOs in docs/slo.md (Google SRE Workbook, "Alerting on SLOs").
+# Built on the recording rules in slo.yml. kind gets k8s/42-slo-alerts.yaml via scripts/gen-k8s-rules.sh.
+#
+# Burn rate = error ratio / error budget. At 1x the budget lasts exactly the 28-day window, and at 14.4x it's
+# gone in under 2 days. Each alert needs the long window AND the short window above the same burn rate:
+#   - the long window proves the problem is big enough to matter (budget actually spent),
+#   - the short window proves it's still happening, so the alert clears minutes after recovery
+#     instead of staying red until the long window forgets the incident.
+#
+#   severity  long  short  burn  28d budget spent when it fires
+#   page      1h    5m     14.4  2.1%
+#   page      6h    30m    6     5.4%
+#   ticket    1d    2h     3     10.7%
+#   ticket    3d    6h     1     10.7%
+#
+# No `for:`. The short window already filters blips, and waiting longer only delays the page.
+# The page and ticket for one SLO share an alertname (so one runbook) and differ by severity. Alertmanager
+# inhibits the ticket while the page fires. {{ $value }} is the long-window burn rate.
+groups:
+  - name: slo-alerts
+    rules:
+      - alert: StorefrontCheckoutAvailabilityBudgetBurn
+        expr: |
+          (
+            (slo:checkout_availability:error_ratio_rate1h / on(slo) (1 - slo:checkout_availability:objective)) > 14.4
+            and
+            (slo:checkout_availability:error_ratio_rate5m / on(slo) (1 - slo:checkout_availability:objective)) > 14.4
+          )
+          or
+          (
+            (slo:checkout_availability:error_ratio_rate6h / on(slo) (1 - slo:checkout_availability:objective)) > 6
+            and
+            (slo:checkout_availability:error_ratio_rate30m / on(slo) (1 - slo:checkout_availability:objective)) > 6
+          )
+        labels:
+          severity: page
+          slo: checkout-availability
+        annotations:
+          summary: "Checkout availability is burning its error budget fast"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutAvailabilityBudgetBurn.md"
+      - alert: StorefrontCheckoutAvailabilityBudgetBurn
+        expr: |
+          (
+            (slo:checkout_availability:error_ratio_rate1d / on(slo) (1 - slo:checkout_availability:objective)) > 3
+            and
+            (slo:checkout_availability:error_ratio_rate2h / on(slo) (1 - slo:checkout_availability:objective)) > 3
+          )
+          or
+          (
+            (slo:checkout_availability:error_ratio_rate3d / on(slo) (1 - slo:checkout_availability:objective)) > 1
+            and
+            (slo:checkout_availability:error_ratio_rate6h / on(slo) (1 - slo:checkout_availability:objective)) > 1
+          )
+        labels:
+          severity: ticket
+          slo: checkout-availability
+        annotations:
+          summary: "Checkout availability is burning its error budget slowly"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutAvailabilityBudgetBurn.md"
+      - alert: StorefrontCheckoutLatencyBudgetBurn
+        expr: |
+          (
+            (slo:checkout_latency:error_ratio_rate1h / on(slo) (1 - slo:checkout_latency:objective)) > 14.4
+            and
+            (slo:checkout_latency:error_ratio_rate5m / on(slo) (1 - slo:checkout_latency:objective)) > 14.4
+          )
+          or
+          (
+            (slo:checkout_latency:error_ratio_rate6h / on(slo) (1 - slo:checkout_latency:objective)) > 6
+            and
+            (slo:checkout_latency:error_ratio_rate30m / on(slo) (1 - slo:checkout_latency:objective)) > 6
+          )
+        labels:
+          severity: page
+          slo: checkout-latency
+        annotations:
+          summary: "Checkout latency is burning its error budget fast"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutLatencyBudgetBurn.md"
+      - alert: StorefrontCheckoutLatencyBudgetBurn
+        expr: |
+          (
+            (slo:checkout_latency:error_ratio_rate1d / on(slo) (1 - slo:checkout_latency:objective)) > 3
+            and
+            (slo:checkout_latency:error_ratio_rate2h / on(slo) (1 - slo:checkout_latency:objective)) > 3
+          )
+          or
+          (
+            (slo:checkout_latency:error_ratio_rate3d / on(slo) (1 - slo:checkout_latency:objective)) > 1
+            and
+            (slo:checkout_latency:error_ratio_rate6h / on(slo) (1 - slo:checkout_latency:objective)) > 1
+          )
+        labels:
+          severity: ticket
+          slo: checkout-latency
+        annotations:
+          summary: "Checkout latency is burning its error budget slowly"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutLatencyBudgetBurn.md"
+      - alert: StorefrontCatalogAvailabilityBudgetBurn
+        expr: |
+          (
+            (slo:catalog_availability:error_ratio_rate1h / on(slo) (1 - slo:catalog_availability:objective)) > 14.4
+            and
+            (slo:catalog_availability:error_ratio_rate5m / on(slo) (1 - slo:catalog_availability:objective)) > 14.4
+          )
+          or
+          (
+            (slo:catalog_availability:error_ratio_rate6h / on(slo) (1 - slo:catalog_availability:objective)) > 6
+            and
+            (slo:catalog_availability:error_ratio_rate30m / on(slo) (1 - slo:catalog_availability:objective)) > 6
+          )
+        labels:
+          severity: page
+          slo: catalog-availability
+        annotations:
+          summary: "Catalog availability is burning its error budget fast"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCatalogAvailabilityBudgetBurn.md"
+      - alert: StorefrontCatalogAvailabilityBudgetBurn
+        expr: |
+          (
+            (slo:catalog_availability:error_ratio_rate1d / on(slo) (1 - slo:catalog_availability:objective)) > 3
+            and
+            (slo:catalog_availability:error_ratio_rate2h / on(slo) (1 - slo:catalog_availability:objective)) > 3
+          )
+          or
+          (
+            (slo:catalog_availability:error_ratio_rate3d / on(slo) (1 - slo:catalog_availability:objective)) > 1
+            and
+            (slo:catalog_availability:error_ratio_rate6h / on(slo) (1 - slo:catalog_availability:objective)) > 1
+          )
+        labels:
+          severity: ticket
+          slo: catalog-availability
+        annotations:
+          summary: "Catalog availability is burning its error budget slowly"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCatalogAvailabilityBudgetBurn.md"
+      - alert: StorefrontCartAvailabilityBudgetBurn
+        expr: |
+          (
+            (slo:cart_availability:error_ratio_rate1h / on(slo) (1 - slo:cart_availability:objective)) > 14.4
+            and
+            (slo:cart_availability:error_ratio_rate5m / on(slo) (1 - slo:cart_availability:objective)) > 14.4
+          )
+          or
+          (
+            (slo:cart_availability:error_ratio_rate6h / on(slo) (1 - slo:cart_availability:objective)) > 6
+            and
+            (slo:cart_availability:error_ratio_rate30m / on(slo) (1 - slo:cart_availability:objective)) > 6
+          )
+        labels:
+          severity: page
+          slo: cart-availability
+        annotations:
+          summary: "Cart availability is burning its error budget fast"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCartAvailabilityBudgetBurn.md"
+      - alert: StorefrontCartAvailabilityBudgetBurn
+        expr: |
+          (
+            (slo:cart_availability:error_ratio_rate1d / on(slo) (1 - slo:cart_availability:objective)) > 3
+            and
+            (slo:cart_availability:error_ratio_rate2h / on(slo) (1 - slo:cart_availability:objective)) > 3
+          )
+          or
+          (
+            (slo:cart_availability:error_ratio_rate3d / on(slo) (1 - slo:cart_availability:objective)) > 1
+            and
+            (slo:cart_availability:error_ratio_rate6h / on(slo) (1 - slo:cart_availability:objective)) > 1
+          )
+        labels:
+          severity: ticket
+          slo: cart-availability
+        annotations:
+          summary: "Cart availability is burning its error budget slowly"
+          description: "Burning the 28-day error budget at {{ $value | printf \"%.1f\" }}x the sustainable rate."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCartAvailabilityBudgetBurn.md"
+      # A dead app records no requests, so every SLI above goes quiet instead of red. This covers that hole.
+      - alert: StorefrontApiDown
+        expr: sum(up{job="storefront-api"}) == 0 or absent(up{job="storefront-api"})
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "No storefront-api instance is being scraped successfully"
+          description: "Prometheus can't scrape any storefront-api target. The SLO alerts can't see an outage like this."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontApiDown.md"

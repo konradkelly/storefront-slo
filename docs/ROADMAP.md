@@ -60,11 +60,18 @@ so they can't tell a brief blip apart from a slow drain on reliability. Replace 
 
 Decide what counts as a good event and a bad event before writing any PromQL.
 
+- [x] **Spec written** in [slo.md](slo.md) (2026-10-02): checkout availability 99.5%, checkout latency 99%,
+      catalog availability 99.9%, cart availability 99.9%, all over 28d. Catalog latency is deferred until it
+      has a baseline. Also done: payment failure default lowered to 0.1%, and the k6 script split into
+      `browse` (realistic, default) and `checkout-stress` profiles.
+- [x] Add the exact latency buckets (see below) and measure a `browse` baseline.
+
 | SLO | SLI (good / valid) | Target | Window |
 |-----|--------------------|--------|--------|
 | Checkout availability | Checkouts that did not fail because of us / all checkout attempts | 99.5% | 28d rolling |
 | Checkout latency | `POST /orders` served in < 500ms / all `POST /orders` | 99% | 28d rolling |
 | Catalog availability | `GET /products*` non-5xx / all `GET /products*` | 99.9% | 28d rolling |
+| Cart availability | `/cart/**` non-5xx / all `/cart/**` | 99.9% | 28d rolling |
 
 Things to decide and write down:
 
@@ -94,15 +101,18 @@ Things to decide and write down:
 
   The cause was row locks, not the connection pool (pending stayed at 0 in both). This gives Phase 1 a
   ready-made story: define the latency SLO, show single-tx burning budget at 30 users, switch to saga,
-  and show the burn rate drop.
+  and show the burn rate drop. Design details: [architecture/checkout.md](architecture/checkout.md).
 - **Window on a lab cluster.** A kind cluster never accumulates 28 days of data. Keep 28d in the spec,
   and add a 1d dashboard view so budget consumption is visible during an afternoon of experiments.
 
 ### 1.2 Recording rules (`k8s/41-slo-rules.yaml`)
 
-- [ ] Error ratio per SLO at 5m, 30m, 1h, 2h, 6h, 1d, and 3d windows, named like
+- [x] Error ratio per SLO at 5m, 30m, 1h, 2h, 6h, 1d, and 3d windows, named like
       `slo:checkout_availability:error_ratio_rate1h`.
-- [ ] `slo:*:error_budget_remaining` over the SLO window.
+- [x] `slo:*:error_budget_remaining` over the SLO window.
+      Done 2026-10-02. The source is `prometheus/rules/slo.yml`, loaded by Compose and wrapped into
+      `k8s/41-slo-rules.yaml` by `scripts/gen-k8s-rules.sh`. Unit tests are in `prometheus/tests/slo_test.yml`.
+      Not yet applied to kind.
 - [ ] Write them by hand first. Then generate the same thing with **Sloth** or **Pyrra** and diff the output.
       Understanding the difference is the point of the exercise.
 
@@ -112,23 +122,43 @@ Based on the Google SRE Workbook, "Alerting on SLOs". For a 28d window:
 
 | Severity | Long window | Short window | Burn rate | Budget spent when it fires |
 |----------|-------------|--------------|-----------|----------------------------|
-| page | 1h | 5m | 14.4x | 2% |
-| page | 6h | 30m | 6x | 5% |
-| ticket | 1d | 2h | 3x | 10% |
-| ticket | 3d | 6h | 1x | 10% |
+| page | 1h | 5m | 14.4x | 2.1% |
+| page | 6h | 30m | 6x | 5.4% |
+| ticket | 1d | 2h | 3x | 10.7% |
+| ticket | 3d | 6h | 1x | 10.7% |
 
-- [ ] Replace `StorefrontCheckoutFailureRateHigh` and `StorefrontCheckoutLatencyHigh` with these alerts.
+(The Workbook's 2%/5%/10% are for a 30d window. Over 28d the same burn rates spend slightly more.)
+
+- [x] Replace `StorefrontCheckoutFailureRateHigh` and `StorefrontCheckoutLatencyHigh` with these alerts.
       Keep the old rules in git history to compare against.
-- [ ] Add `runbook_url` and `slo` labels and annotations to every alert.
+- [x] Add `runbook_url` and `slo` labels and annotations to every alert.
+      Done 2026-10-02 in `prometheus/rules/slo-alerts.yml` (kind copy: `k8s/42-slo-alerts.yaml`). There are two alerts
+      per SLO with one alertname, `severity=page` and `severity=ticket`, so each SLO gets one runbook. Also added
+      `StorefrontApiDown`, because a dead app records no requests and the SLO alerts can't see it. Tests are in
+      `prometheus/tests/slo_alerts_test.yml`. They cover a fast outage paging, the page clearing after recovery, a
+      slow burn opening a ticket without paging, a healthy system staying quiet, and the scrape-down cases.
+      Removing the 5m short window from the fast page makes the recovery test fail.
 
 ### 1.4 Alert delivery and runbooks
 
-- [ ] Configure Alertmanager routes: `severity=page` goes to a real receiver (Slack webhook, ntfy.sh, or email),
+- [x] Configure Alertmanager routes: `severity=page` goes to a real receiver (Slack webhook, ntfy.sh, or email),
       and `severity=ticket` goes to a quieter channel. Add grouping and an inhibition rule so a page silences
       the matching ticket.
-- [ ] Write `docs/runbooks/<alert>.md` for each alert, covering what it means, first queries to run,
+      Done 2026-10-02 for Compose in `alertmanager/alertmanager.yml`: Slack `#alerts-page` and `#alerts-ticket`, with
+      webhook URLs in the gitignored `alertmanager/secrets/`, plus a local `alert-logger` that receives everything.
+      Inhibitions: a page mutes the matching ticket, and `StorefrontApiDown` mutes all burn alerts. Verified with
+      `amtool config routes test`, injected alerts (the same-SLO ticket shows `suppressed`), and a real
+      `StorefrontApiDown` from stopping the API.
+- [x] Slack webhooks created and the secret files filled in (manual, see `alertmanager/secrets/README.md`).
+      Done 2026-10-02: workspace StorefrontSLO, channels `#alerts-page` and `#alerts-ticket`, test alert delivered.
+- [ ] Same Alertmanager config on kind. kube-prometheus-stack runs its own Alertmanager, so pass this file with
+      `--set-file alertmanager.stringConfig=...`, mount the Slack URLs from a Secret
+      (`alertmanager.alertmanagerSpec.secrets`), and deploy the logger or drop its receivers there.
+- [x] Write `docs/runbooks/<alert>.md` for each alert, covering what it means, first queries to run,
       likely causes (payment provider, DB pool, stockouts, bad deploy), and how to mitigate.
-- [ ] Add `docs/postmortem-template.md`.
+      Five runbooks, one per alertname. Page and ticket share a runbook because diagnosis is the same.
+      Stockouts aren't a cause: 409s are excluded from the SLI.
+- [x] Add `docs/postmortem-template.md`.
 
 ### 1.5 SLO dashboard
 

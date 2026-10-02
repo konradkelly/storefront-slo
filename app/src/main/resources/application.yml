@@ -25,6 +25,10 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
+      # Exact bucket boundaries for latency SLOs (docs/slo.md). Without them the nearest
+      # default buckets are 0.447s and 0.537s, and "under 500ms" can't be counted exactly.
+      slo:
+        http.server.requests: 100ms,300ms,500ms,1s
 
 storefront:
   # saga (default) or single-tx. See OrderService for the difference.
@@ -34,5 +38,5 @@ storefront:
   restock-level: ${RESTOCK_LEVEL:200}
   restock-interval-ms: ${RESTOCK_INTERVAL_MS:60000}
   payment:
-    failure-rate: ${PAYMENT_FAILURE_RATE:0.02}
+    failure-rate: ${PAYMENT_FAILURE_RATE:0.001}
     latency-ms: ${PAYMENT_LATENCY_MS:150}

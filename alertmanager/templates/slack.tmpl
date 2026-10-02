@@ -1,0 +1,13 @@
+{{/* Slack message for one notification group (one alertname + slo). */}}
+
+{{ define "storefront.slack.title" -}}
+[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})
+{{- end }}
+
+{{ define "storefront.slack.text" -}}
+{{ range .Alerts -}}
+*{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+{{ if .Labels.slo }}SLO: `{{ .Labels.slo }}` · {{ end }}<{{ .Annotations.runbook_url }}|Runbook>
+{{ end -}}
+{{- end }}

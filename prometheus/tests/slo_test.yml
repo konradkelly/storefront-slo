@@ -1,0 +1,132 @@
+# Unit tests for prometheus/rules/slo.yml. Run from the repo root:
+#   docker run --rm -v "$PWD/prometheus:/src" -w /src --entrypoint promtool \
+#     prom/prometheus:v3.15.0 test rules tests/slo_test.yml
+#
+# Series notation: '0+98x60' starts at 0 and adds 98 per interval (1m) for 60 intervals, so the rate is
+# 98 per minute. Counter values only need the right ratios. The rules divide rates, so units cancel.
+rule_files:
+  - ../rules/slo.yml
+
+evaluation_interval: 1m
+# Ratios like 2/100 come out as 0.020000000000000004 in floating point. Compare with a tiny tolerance.
+fuzzy_compare: true
+
+tests:
+  # Healthy-ish checkout with no 5xx at all. The 500 series doesn't exist, which is the case `or vector(0)`
+  # guards against. 400s and 409s must not count in either direction.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+98x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="402"}'
+        values: '0+2x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="409"}'
+        values: '0+30x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="400"}'
+        values: '0+50x60'
+      - series: 'storefront_checkouts_total{application="storefront-api", status="payment_failed"}'
+        values: '0+2x60'
+      - series: 'storefront_checkouts_total{application="storefront-api", status="out_of_stock"}'
+        values: '0+30x60'
+    promql_expr_test:
+      # 2 payment failures out of 100 valid (98 + 2). The 30 out-of-stock and 50 bad requests are excluded.
+      - expr: slo:checkout_availability:error_ratio_rate5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'slo:checkout_availability:error_ratio_rate5m{slo="checkout-availability"}'
+            value: 0.02
+      - expr: slo:checkout_availability:error_ratio_rate1h
+        eval_time: 1h
+        exp_samples:
+          - labels: 'slo:checkout_availability:error_ratio_rate1h{slo="checkout-availability"}'
+            value: 0.02
+      # 2% errors against a 0.5% budget is 4x the budget: 1 - 4 = -3.
+      # 1 - 0.995 isn't exact in floating point, so the result is -2.9999999999999964. Check it's within
+      # 1e-9 instead: `< bool` returns 1 when true and 0 when false.
+      - expr: abs(slo:checkout_availability:error_budget_remaining - -3) < bool 1e-9
+        eval_time: 1h
+        exp_samples:
+          - labels: '{slo="checkout-availability"}'
+            value: 1
+
+  # Unhandled errors (5xx) never reach the business counter but must still count as bad.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+95x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="402"}'
+        values: '0+2x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="500"}'
+        values: '0+3x60'
+      - series: 'storefront_checkouts_total{application="storefront-api", status="payment_failed"}'
+        values: '0+2x60'
+    promql_expr_test:
+      # (3 + 2) / (95 + 2 + 3)
+      - expr: slo:checkout_availability:error_ratio_rate5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'slo:checkout_availability:error_ratio_rate5m{slo="checkout-availability"}'
+            value: 0.05
+
+  # Latency: 75 of 100 checkouts under 500ms. Fast 400s must not pad the good count.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status="201", le="0.5"}'
+        values: '0+75x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+100x60'
+      - series: 'http_server_requests_seconds_bucket{application="storefront-api", uri="/orders", method="POST", status="400", le="0.5"}'
+        values: '0+50x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="400"}'
+        values: '0+50x60'
+    promql_expr_test:
+      - expr: slo:checkout_latency:error_ratio_rate5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'slo:checkout_latency:error_ratio_rate5m{slo="checkout-latency"}'
+            value: 0.25
+
+  # Catalog with no 5xx reads 0, not "no data". Cart with 1 in 1000 failing sits exactly on its budget.
+  # 404s count as valid and good.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products", method="GET", status="200"}'
+        values: '0+100x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products/{id}", method="GET", status="200"}'
+        values: '0+400x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/cart/items", method="POST", status="201"}'
+        values: '0+949x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/cart/items", method="POST", status="404"}'
+        values: '0+50x60'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/cart/items", method="POST", status="500"}'
+        values: '0+1x60'
+    promql_expr_test:
+      - expr: slo:catalog_availability:error_ratio_rate5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'slo:catalog_availability:error_ratio_rate5m{slo="catalog-availability"}'
+            value: 0
+      - expr: slo:cart_availability:error_ratio_rate5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'slo:cart_availability:error_ratio_rate5m{slo="cart-availability"}'
+            value: 0.001
+      - expr: abs(slo:cart_availability:error_budget_remaining) < bool 1e-9
+        eval_time: 1h
+        exp_samples:
+          - labels: '{slo="cart-availability"}'
+            value: 1
+
+  # Another service's metrics in the same Prometheus (normal on kind) must not leak into the SLIs.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products", method="GET", status="200"}'
+        values: '0+100x60'
+      - series: 'http_server_requests_seconds_count{application="other-app", uri="/products", method="GET", status="500"}'
+        values: '0+100x60'
+    promql_expr_test:
+      - expr: slo:catalog_availability:error_ratio_rate5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'slo:catalog_availability:error_ratio_rate5m{slo="catalog-availability"}'
+            value: 0

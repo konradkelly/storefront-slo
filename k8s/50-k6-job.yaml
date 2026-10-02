@@ -17,6 +17,9 @@ spec:
           env:
             - name: BASE_URL
               value: http://storefront-api.storefront.svc:8080
+            # browse (realistic, default) or checkout-stress (saga vs. single-tx experiment)
+            - name: PROFILE
+              value: browse
           volumeMounts:
             - name: script
               mountPath: /scripts
