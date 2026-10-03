@@ -18,7 +18,7 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/storefront
       DB_USER: storefront
       DB_PASSWORD: storefront
-      PAYMENT_FAILURE_RATE: "0.001"
+      PAYMENT_FAILURE_RATE: ${PAYMENT_FAILURE_RATE:-0.001}
       PAYMENT_LATENCY_MS: "150"
       CHECKOUT_MODE: ${CHECKOUT_MODE:-saga}
       RESTOCK_INTERVAL_MS: ${RESTOCK_INTERVAL_MS:-60000}

@@ -25,6 +25,9 @@ Customers try to pay and can't. This is lost revenue. Some of them retry, which 
    slo:checkout_availability:error_ratio_rate1h
    ```
    If 5m is back near 0, the incident is over and the alert will clear by itself. Write it up anyway.
+   A page through the 6h/30m pair can stay up **to 30 minutes after the fix**, until the outage leaves the
+   30m window (seen in [the fast-burn experiment](../postmortems/2026-10-02-payment-outage-fast-burn.md)). Trust
+   the 5m window, and don't undo a fix because the page is still red.
 2. **Payment or us?** Split the bad events by source:
    ```promql
    sum(rate(storefront_checkouts_total{status="payment_failed"}[5m]))
