@@ -13,3 +13,7 @@ Thumbs.db
 # Alertmanager secrets (Slack webhook URLs). Only the README is committed.
 alertmanager/secrets/*
 !alertmanager/secrets/README.md
+
+# Python bytecode
+__pycache__/
+*.pyc
