@@ -13,6 +13,16 @@ rule_files:
 
 evaluation_interval: 1m
 
+# Evaluate the recording rules before the alerts that read them. Without a fixed order, promtool picks a random
+# group order on each run, and when the alerts go first they see last step's recorded values. That made the
+# fast-burn test flaky (20.0x on some runs, 19.0x on others).
+group_eval_order:
+  - slo-checkout-availability
+  - slo-checkout-latency
+  - slo-catalog-availability
+  - slo-cart-availability
+  - slo-alerts
+
 tests:
   # Payment provider goes down for 30 minutes (30% of checkouts fail), then recovers.
   # Outage minutes: 4321 to 4350. Traffic stays at 100 checkouts per minute throughout.
@@ -72,6 +82,40 @@ tests:
             exp_annotations:
               summary: "Checkout availability is burning its error budget slowly"
               description: "Burning the 28-day error budget at 3.3x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutAvailabilityBudgetBurn.md"
+
+  # Experiment 2's shape with production-like history (docs/postmortems/2026-10-03-payment-slow-burn.md):
+  # 3 days at the default 0.1%, then 2% (4x). In the lab, with 70 minutes of history, the ticket came after
+  # 9 minutes. With 3 real days it takes 15-16 hours, through the 3d/6h pair, and it never pages.
+  # 5m steps keep the 3-day series short. Counts are per 5 minutes (1000 checkouts).
+  - interval: 5m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+999x864 863136+980x240'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="402"}'
+        values: '0+1x864 884+20x240'
+      - series: 'storefront_checkouts_total{application="storefront-api", status="payment_failed"}'
+        values: '0+1x864 884+20x240'
+    alert_rule_test:
+      - eval_time: 87h
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+      - eval_time: 88h
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels: {severity: ticket, slo: checkout-availability}
+            exp_annotations:
+              summary: "Checkout availability is burning its error budget slowly"
+              description: "Burning the 28-day error budget at 1.0x the sustainable rate."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutAvailabilityBudgetBurn.md"
+      # 20 hours in: the 1d/2h pair has crossed 3x as well (the value is now its 1d burn rate). Still only a ticket.
+      - eval_time: 92h
+        alertname: StorefrontCheckoutAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels: {severity: ticket, slo: checkout-availability}
+            exp_annotations:
+              summary: "Checkout availability is burning its error budget slowly"
+              description: "Burning the 28-day error budget at 3.4x the sustainable rate."
               runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutAvailabilityBudgetBurn.md"
 
   # A healthy system at the default 0.1% payment failure rate (0.2x) stays quiet.

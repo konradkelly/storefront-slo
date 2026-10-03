@@ -178,9 +178,9 @@ never fires on it, but the 1d ticket alert does. Write both up using the postmor
 
 - [x] Fast burn (`0.3`): paged after 9 min, 1.54% of the 28d budget spent, page cleared 26 min after recovery.
       [Postmortem](postmortems/2026-10-02-payment-outage-fast-burn.md).
-- [ ] Slow burn: use `0.02` (4x), not `0.03`. 3% is exactly 6x, the 6h/30m page threshold, so it would flap
-      instead of staying a ticket. Run `scripts/experiments/exp2-slow-burn.sh` (~1h50m, see its README), then write
-      the postmortem.
+- [x] Slow burn (`0.02`, 4x; `0.03` is exactly the 6x page threshold and would flap): ticket after 9 min in the lab
+      (15–16 h with real history, per the promtool scenario), never paged, and the old threshold peaked at 4.8% without
+      firing. [Postmortem](postmortems/2026-10-03-payment-slow-burn.md).
 
 ---
 
