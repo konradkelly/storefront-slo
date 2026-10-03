@@ -176,6 +176,12 @@ synthetic series, and the SLO dashboard is committed.
 and how much budget is gone at that point. Then try `0.03`, which is a slow burn. The old threshold alert
 never fires on it, but the 1d ticket alert does. Write both up using the postmortem template.
 
+- [x] Fast burn (`0.3`): paged after 9 min, 1.54% of the 28d budget spent, page cleared 26 min after recovery.
+      [Postmortem](postmortems/2026-10-02-payment-outage-fast-burn.md).
+- [ ] Slow burn: use `0.02` (4x), not `0.03`. 3% is exactly 6x, the 6h/30m page threshold, so it would flap
+      instead of staying a ticket. Run `scripts/experiments/exp2-slow-burn.sh` (~1h50m, see its README), then write
+      the postmortem.
+
 ---
 
 ## Phase 2: Production-shaped Kubernetes
