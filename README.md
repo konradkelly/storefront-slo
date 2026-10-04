@@ -74,6 +74,11 @@ Each alert links to its runbook in [docs/runbooks/](docs/runbooks/). To put traf
 docker compose --profile load run --rm k6
 ```
 
+The schema is managed by Flyway migrations in `app/src/main/resources/db/migration`, which also seed the catalog.
+Hibernate only validates that the entities match (`ddl-auto: validate`). A database created before Flyway was added
+has tables but no Flyway history, so the app refuses to start against it. In Compose, `docker compose down` removes
+the old Postgres container (it has no volume), and the next `up` starts empty.
+
 Tests run the app against a real Postgres through Testcontainers, so Docker must be running:
 
 ```bash
@@ -182,6 +187,4 @@ Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 
 ## Known shortcuts (fine for learning, not for production)
 
 - Postgres uses an emptyDir, so data is lost when its pod restarts.
-- `ddl-auto: update` manages the schema; a real app would use Flyway or Liquibase.
-- The API starts at one replica because catalog seeding is not safe to run concurrently.
 - Credentials are plain values in a Secret manifest.

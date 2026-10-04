@@ -7,8 +7,13 @@ spring:
     password: ${DB_PASSWORD:storefront}
   jpa:
     hibernate:
-      ddl-auto: update
+      # Flyway owns the schema (src/main/resources/db/migration). Hibernate only checks that the entities match it,
+      # so an entity change without a migration fails at startup instead of silently altering tables.
+      ddl-auto: validate
     open-in-view: false
+  flyway:
+    placeholders:
+      initial_stock: ${storefront.restock-level}
 
 management:
   endpoints:

@@ -4,7 +4,8 @@ metadata:
   name: storefront-api
   namespace: storefront
 spec:
-  # Start at 1 so only one pod seeds the catalog. Scale up later as an experiment.
+  # Flyway seeds the catalog exactly once (verified with 3 replicas starting together), so any count is safe.
+  # Going to 3 comes with the PodDisruptionBudget and spread constraints in Phase 2.2.
   replicas: 1
   selector:
     matchLabels:

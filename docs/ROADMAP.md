@@ -205,8 +205,12 @@ dashboards, app, and SLO rules. Problems found on the way:
 
 ### 2.1 Schema and data
 
-- [ ] Replace `ddl-auto: update` with **Flyway** migrations, and move catalog seeding into a migration.
+- [x] Replace `ddl-auto: update` with **Flyway** migrations, and move catalog seeding into a migration.
       Seeding then runs exactly once, which removes the single-replica restriction.
+      Done 2026-10-03. V1 recreates the exact Hibernate schema (from `pg_dump`), and V2 seeds the catalog with stock from a
+      placeholder bound to `storefront.restock-level`. `ddl-auto: validate` now fails startup on drift (checked by
+      renaming a column: `missing column [price_cents]`). On kind, 3 replicas started together on an empty database:
+      one migrated, two waited on Flyway's lock and found it up to date, and there were exactly 8 products.
 - [ ] Move Postgres off `emptyDir`. Options:
       - A StatefulSet with a PVC teaches the primitives.
       - The **CloudNativePG** operator (recommended) teaches operators and CRDs, and ships a PodMonitor
