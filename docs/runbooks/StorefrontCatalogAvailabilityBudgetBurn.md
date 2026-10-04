@@ -32,7 +32,7 @@ budget (about 40 minutes of full outage per 28 days), even short incidents matte
 
 | Cause | How to confirm | Mitigation |
 |-------|----------------|------------|
-| Postgres down or restarting | All SLOs burning at once. Postgres not Ready. App logs show connection errors. | Bring Postgres back. In kind, Postgres uses an emptyDir, so a restart loses data and the app reseeds it. |
+| Postgres down or failing over | All SLOs burning at once. App logs show connection errors. `kubectl -n storefront get cluster storefront-db` shows a phase other than "Cluster in healthy state", or a new current primary. | CloudNativePG promotes the standby by itself. Wait for the phase to return to healthy, then confirm errors stop. If no instance becomes ready, check `kubectl -n storefront describe cluster storefront-db` and the operator logs in `cnpg-system`. Data lives on persistent volumes, so a restart doesn't lose it. |
 | Connection pool exhausted | `hikaricp_connections_pending` > 0 and timeouts rising. | Reduce load or scale out. Look for slow or blocked queries. |
 | Bad deploy | Errors start at the rollout. | `kubectl -n storefront rollout undo deploy/storefront-api`. |
 | Some replicas unhealthy | Errors come from one `instance`/`pod` (`sum by (instance) (...)`). | Delete the bad pod. Phase 2's readiness probes take it out of rotation automatically. |

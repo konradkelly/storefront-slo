@@ -1,56 +1,60 @@
-# Learning setup only: data lives in an emptyDir and disappears if the pod restarts.
-apiVersion: v1
-kind: Secret
+# Postgres, run by the CloudNativePG operator (installed by scripts/kind-up.sh, values in k8s/monitoring/cnpg-values.yaml).
+#
+# The operator turns this one resource into a primary plus a streaming-replication standby, each with its own
+# PersistentVolumeClaim, and fails over to the standby if the primary is lost. It also creates:
+#   - Services: storefront-db-rw (always the current primary; the app uses this), -ro (standbys), -r (any)
+#   - Secret storefront-db-app: username/password for the "storefront" owner, generated, never in git
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
 metadata:
   name: storefront-db
   namespace: storefront
-type: Opaque
-stringData:
-  POSTGRES_DB: storefront
-  POSTGRES_USER: storefront
-  POSTGRES_PASSWORD: storefront
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: postgres
-  namespace: storefront
 spec:
-  replicas: 1
+  instances: 2
+  # Same Postgres major/minor as Compose. "minimal" is CNPG's smallest image: no extra extensions, which the app
+  # doesn't use.
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.14-minimal-trixie
+
+  # When the primary pod is deleted (drain, eviction, kubectl delete), Postgres first does a "smart" shutdown: no new
+  # connections, but existing sessions may finish. The app's connection pool never closes its sessions, so the
+  # default 180s ran out every time, and the standby wasn't promoted until then (measured: 187s). 15s keeps a grace
+  # period for in-flight transactions and still fails over quickly.
+  smartShutdownTimeout: 15
+
+  bootstrap:
+    initdb:
+      database: storefront
+      owner: storefront # Flyway creates the schema on first app start
+
+  storage:
+    size: 1Gi # kind's default StorageClass (local-path): each volume lives on one node
+
+  # Spread primary and standby across nodes, so losing a node can't take out both.
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+---
+# Scrapes each instance's built-in exporter (port "metrics", 9187). The Cluster's own enablePodMonitor flag is
+# deprecated in favor of a PodMonitor like this one. release=kps is what kube-prometheus-stack selects on.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: storefront-db
+  namespace: storefront
+  labels:
+    release: kps
+spec:
   selector:
     matchLabels:
-      app: postgres
-  template:
-    metadata:
-      labels:
-        app: postgres
-    spec:
-      containers:
-        - name: postgres
-          image: postgres:16.14
-          envFrom:
-            - secretRef:
-                name: storefront-db
-          ports:
-            - containerPort: 5432
-          readinessProbe:
-            exec:
-              command: ["pg_isready", "-U", "storefront", "-d", "storefront"]
-            periodSeconds: 5
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/postgresql/data
-      volumes:
-        - name: data
-          emptyDir: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres
-  namespace: storefront
-spec:
-  selector:
-    app: postgres
-  ports:
-    - port: 5432
+      cnpg.io/cluster: storefront-db
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics

@@ -28,7 +28,7 @@ alerts while this one fires, so it's the only page you'll get.
 | Cause | How to confirm | Mitigation |
 |-------|----------------|------------|
 | Crash loop | `kubectl -n storefront get pods` shows CrashLoopBackOff. `kubectl -n storefront logs deploy/storefront-api --previous`. | Fix by cause. If a deploy started it: `kubectl -n storefront rollout undo deploy/storefront-api`. |
-| Can't reach Postgres at startup | Logs show connection refused or auth errors to Postgres. | Bring Postgres up first (`kubectl -n storefront rollout status deploy/postgres`). |
+| Can't reach Postgres at startup | Logs show connection refused or auth errors for `storefront-db-rw`. | Check the database cluster: `kubectl -n storefront get cluster storefront-db` (phase, ready instances, current primary). If no instance is ready, see `kubectl -n storefront describe cluster storefront-db` and the CloudNativePG operator logs in `cnpg-system`. |
 | Out of memory | `kubectl describe pod` shows `OOMKilled`. | Raise the memory limit. Look for a leak if usage keeps growing. |
 | Container stopped (Compose) | `docker compose ps` shows it exited. | `docker compose up -d storefront-api`, then read `docker compose logs storefront-api`. |
 

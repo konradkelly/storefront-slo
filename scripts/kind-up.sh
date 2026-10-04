@@ -10,6 +10,7 @@ cd "$(dirname "$0")/.."
 CTX=kind-storefront
 CALICO_VERSION=v3.32.2
 KPS_VERSION=91.9.0
+CNPG_VERSION=0.29.1 # chart; operator 1.30.1
 k() { kubectl --context "$CTX" "$@"; }
 step() { echo; echo "== $*"; }
 
@@ -63,13 +64,20 @@ k -n monitoring create configmap storefront-dashboards \
   --from-file=storefront.json=grafana/dashboards/storefront.json --from-file=slo.json=grafana/dashboards/slo.json \
   --dry-run=client -o yaml | k label --local -f - grafana_dashboard=1 -o yaml | k apply -f -
 
+step "CloudNativePG operator $CNPG_VERSION (must exist before the storefront Cluster resource)"
+helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null 2>&1 || true
+helm repo update cnpg >/dev/null
+helm upgrade --install cnpg cnpg/cloudnative-pg \
+  --kube-context "$CTX" --namespace cnpg-system --create-namespace --version "$CNPG_VERSION" \
+  -f k8s/monitoring/cnpg-values.yaml --wait --timeout 5m
+
 step "storefront-api image"
 docker build -q -t storefront-api:dev ./app
 kind load docker-image storefront-api:dev --name storefront
 
 step "storefront workloads and SLO rules"
 k apply -k k8s/overlays/kind
-k -n storefront rollout status deploy/postgres --timeout=300s
+k -n storefront wait --for=condition=Ready cluster/storefront-db --timeout=600s
 k -n storefront rollout restart deploy/storefront-api >/dev/null # pick up a freshly loaded :dev image
 k -n storefront rollout status deploy/storefront-api --timeout=300s
 

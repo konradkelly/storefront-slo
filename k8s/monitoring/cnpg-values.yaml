@@ -1,0 +1,18 @@
+# CloudNativePG operator values (chart 0.29.1, operator 1.30.1). Installed by scripts/kind-up.sh into cnpg-system.
+# The operator watches Cluster resources in every namespace; the storefront database is k8s/base/postgres.yaml.
+monitoring:
+  # Scrape the operator itself. kube-prometheus-stack only picks up monitors labeled release=kps.
+  podMonitorEnabled: true
+  podMonitorAdditionalLabels:
+    release: kps
+  # CNPG's own dashboard, loaded by the Grafana sidecar like the storefront dashboards.
+  grafanaDashboard:
+    create: true
+    namespace: monitoring
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

@@ -186,5 +186,5 @@ Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 
 
 ## Known shortcuts (fine for learning, not for production)
 
-- Postgres uses an emptyDir, so data is lost when its pod restarts.
-- Credentials are plain values in a Secret manifest.
+- Compose uses fixed lab credentials (`storefront`/`storefront`) in `docker-compose.yml`. On kind, CloudNativePG
+  generates the database credentials, so none are in git.

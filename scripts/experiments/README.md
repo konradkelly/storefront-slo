@@ -8,8 +8,12 @@ material for a postmortem ([template](../../docs/postmortem-template.md)).
 |--------|--------------|-----------------|------|
 | `exp1-fast-burn.sh` | 30% payment failures until the page fires, +5 min, then recovers and watches 40 min | Page in about 9 min, clears about 26 min after recovery. Done, see [postmortem](../../docs/postmortems/2026-10-02-payment-outage-fast-burn.md) | ~1h55m |
 | `exp2-slow-burn.sh` | 2% payment failures (4x burn) until the ticket fires, +30 min | Ticket after ~16 min, **no page**, old `> 5% for 5m` threshold never crosses | ~1h50m |
+| `exp3-db-failover.sh` | kind only: checkout-stress load, delete the CloudNativePG primary after 3 min, timeline the failover | With `smartShutdownTimeout: 15`: new primary at +43s, 2 failed requests, 0 failed checkouts (see docs/ROADMAP.md 2.1) | ~13m |
 
 ## Before you run one
+
+The notes below are for experiments 1 and 2, which run on Compose. Experiment 3 runs on kind (`scripts/kind-up.sh`),
+clears nothing, and leaves the database cluster healthy again by the end (the deleted pod returns as the standby).
 
 - **It clears Prometheus storage** (`docker compose rm -sfv prometheus`) so old data doesn't skew the numbers, and
   recreates the API with a different `PAYMENT_FAILURE_RATE`. Real Slack notifications go out.

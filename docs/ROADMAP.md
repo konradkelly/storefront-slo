@@ -211,10 +211,38 @@ dashboards, app, and SLO rules. Problems found on the way:
       placeholder bound to `storefront.restock-level`. `ddl-auto: validate` now fails startup on drift (checked by
       renaming a column: `missing column [price_cents]`). On kind, 3 replicas started together on an empty database:
       one migrated, two waited on Flyway's lock and found it up to date, and there were exactly 8 products.
-- [ ] Move Postgres off `emptyDir`. Options:
+- [x] Move Postgres off `emptyDir`. Options:
       - A StatefulSet with a PVC teaches the primitives.
       - The **CloudNativePG** operator (recommended) teaches operators and CRDs, and ships a PodMonitor
         and a Grafana dashboard.
+      Done 2026-10-04 with CloudNativePG 1.30.1 (chart 0.29.1): a `Cluster` with 2 instances (primary plus an async
+      streaming standby, required anti-affinity, a 1Gi PVC each) and a hand-written PodMonitor, because the Cluster's
+      `enablePodMonitor` is deprecated. The operator's dashboard is in Grafana. The app uses `storefront-db-rw` with
+      the generated `storefront-db-app` Secret, so the database password is no longer in git.
+
+      **Failover experiment** (checkout-stress, 10 VUs, primary pod deleted after 3 min):
+
+      | | default `smartShutdownTimeout` (180s) | `smartShutdownTimeout: 15` |
+      |---|---|---|
+      | standby chosen | +187s | +23s |
+      | new primary accepting writes | +188s | +43s |
+      | back to 2 healthy instances | n/a | +78s |
+      | failed requests (k6) | 4 of 10,481, all at the cutover | 2 of 9,624, all at the cutover |
+      | failed checkouts | 1 | 0 |
+
+      Deleting a pod triggers a "smart" shutdown that waits for sessions to end, but the connection pool never ends
+      them, so the default always ran the full 180s before promotion. The old primary kept serving through existing
+      connections meanwhile, so users barely noticed, but the cluster spent 3 minutes neither healthy nor failed over.
+      With 15s, requests queued on the pool (pending connections peaked at 10) for about 20s instead of failing.
+      Replication is async: a failover can lose the last moments of committed writes. Synchronous replication
+      would prevent that, but with 2 instances it blocks all writes whenever the standby is down.
+      Rerun with `scripts/experiments/exp3-db-failover.sh`. Separately, checkout-stress at 10 VUs left about 25% of
+      checkouts over 500ms for the whole run on kind's limited CPU, which is what autoscaling in 2.2 should address.
+- [ ] **SLI blind spot found during the failover experiment.** Micrometer only creates a `status="500"` series at the
+      first 500, and `increase()`/`rate()` ignore a series' first sample. So the first errors of an incident
+      can be missing from every availability SLI. In the first failover run, all 4 errors were invisible to the
+      SLO queries. Options to investigate: Prometheus' created-timestamp zero injection with OpenMetrics `_created`,
+      or pre-registering the error series at startup.
 
 ### 2.2 Availability during change
 
