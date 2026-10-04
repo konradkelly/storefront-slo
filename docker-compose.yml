@@ -44,7 +44,7 @@ services:
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./alertmanager/templates:/etc/alertmanager/templates:ro
-      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro
+      - ./alertmanager/secrets:/etc/alertmanager/secrets/alertmanager-slack:ro
     ports:
       - "9093:9093"
     depends_on:

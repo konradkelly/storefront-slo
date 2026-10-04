@@ -22,5 +22,5 @@ gen() {
   echo "wrote $2"
 }
 
-gen prometheus/rules/slo.yml k8s/41-slo-rules.yaml storefront-slo-rules
-gen prometheus/rules/slo-alerts.yml k8s/42-slo-alerts.yaml storefront-slo-alerts
+gen prometheus/rules/slo.yml k8s/base/slo-rules.yaml storefront-slo-rules
+gen prometheus/rules/slo-alerts.yml k8s/base/slo-alerts.yaml storefront-slo-alerts

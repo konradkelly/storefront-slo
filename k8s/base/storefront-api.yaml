@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: storefront-api
-          image: storefront-api:dev
+          image: storefront-api # each overlay sets the registry and tag
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -40,18 +40,26 @@ spec:
               value: "150"
             - name: CHECKOUT_MODE
               value: saga
+          # The startup probe holds off the other two until the app is up. Startup time varies a lot (about 10s in
+          # Compose, 60-70s on a busy kind cluster), and a fixed initialDelaySeconds on liveness raced it: pods
+          # were killed seconds after logging "Started". This allows up to 3 minutes, then liveness takes over.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: http
-            initialDelaySeconds: 15
             periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
-            initialDelaySeconds: 40
             periodSeconds: 10
+            failureThreshold: 3
           resources:
             requests:
               cpu: 250m

@@ -1,5 +1,5 @@
 # Multi-window, multi-burn-rate alerts for the SLOs in docs/slo.md (Google SRE Workbook, "Alerting on SLOs").
-# Built on the recording rules in slo.yml. kind gets k8s/42-slo-alerts.yaml via scripts/gen-k8s-rules.sh.
+# Built on the recording rules in slo.yml. kind gets k8s/base/slo-alerts.yaml via scripts/gen-k8s-rules.sh.
 #
 # Burn rate = error ratio / error budget. At 1x the budget lasts exactly the 28-day window, and at 14.4x it's
 # gone in under 2 days. Each alert needs the long window AND the short window above the same burn rate:

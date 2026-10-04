@@ -105,14 +105,14 @@ Things to decide and write down:
 - **Window on a lab cluster.** A kind cluster never accumulates 28 days of data. Keep 28d in the spec,
   and add a 1d dashboard view so budget consumption is visible during an afternoon of experiments.
 
-### 1.2 Recording rules (`k8s/41-slo-rules.yaml`)
+### 1.2 Recording rules (`k8s/base/slo-rules.yaml`)
 
 - [x] Error ratio per SLO at 5m, 30m, 1h, 2h, 6h, 1d, and 3d windows, named like
       `slo:checkout_availability:error_ratio_rate1h`.
 - [x] `slo:*:error_budget_remaining` over the SLO window.
       Done 2026-10-02. The source is `prometheus/rules/slo.yml`, loaded by Compose and wrapped into
-      `k8s/41-slo-rules.yaml` by `scripts/gen-k8s-rules.sh`. Unit tests are in `prometheus/tests/slo_test.yml`.
-      Not yet applied to kind.
+      `k8s/base/slo-rules.yaml` by `scripts/gen-k8s-rules.sh`. Unit tests are in `prometheus/tests/slo_test.yml`.
+      Applied to kind on 2026-10-03 by `scripts/kind-up.sh`.
 - [ ] Write them by hand first. Then generate the same thing with **Sloth** or **Pyrra** and diff the output.
       Understanding the difference is the point of the exercise.
 
@@ -132,7 +132,7 @@ Based on the Google SRE Workbook, "Alerting on SLOs". For a 28d window:
 - [x] Replace `StorefrontCheckoutFailureRateHigh` and `StorefrontCheckoutLatencyHigh` with these alerts.
       Keep the old rules in git history to compare against.
 - [x] Add `runbook_url` and `slo` labels and annotations to every alert.
-      Done 2026-10-02 in `prometheus/rules/slo-alerts.yml` (kind copy: `k8s/42-slo-alerts.yaml`). There are two alerts
+      Done 2026-10-02 in `prometheus/rules/slo-alerts.yml` (kind copy: `k8s/base/slo-alerts.yaml`). There are two alerts
       per SLO with one alertname, `severity=page` and `severity=ticket`, so each SLO gets one runbook. Also added
       `StorefrontApiDown`, because a dead app records no requests and the SLO alerts can't see it. Tests are in
       `prometheus/tests/slo_alerts_test.yml`. They cover a fast outage paging, the page clearing after recovery, a
@@ -151,7 +151,7 @@ Based on the Google SRE Workbook, "Alerting on SLOs". For a 28d window:
       `StorefrontApiDown` from stopping the API.
 - [x] Slack webhooks created and the secret files filled in (manual, see `alertmanager/secrets/README.md`).
       Done 2026-10-02: workspace StorefrontSLO, channels `#alerts-page` and `#alerts-ticket`, test alert delivered.
-- [ ] Same Alertmanager config on kind. kube-prometheus-stack runs its own Alertmanager, so pass this file with
+- [x] Same Alertmanager config on kind. kube-prometheus-stack runs its own Alertmanager, so pass this file with
       `--set-file alertmanager.stringConfig=...`, mount the Slack URLs from a Secret
       (`alertmanager.alertmanagerSpec.secrets`), and deploy the logger or drop its receivers there.
 - [x] Write `docs/runbooks/<alert>.md` for each alert, covering what it means, first queries to run,
@@ -188,6 +188,21 @@ never fires on it, but the 1d ticket alert does. Write both up using the postmor
 
 This phase fixes the items in the README's "Known shortcuts" list and adds the controls a real workload has.
 
+### 2.0 Bootstrap (done 2026-10-03)
+
+`scripts/kind-up.sh` creates the cluster and deploys everything in one rerunnable step: 1 control plane plus 3
+workers in fake zones, Calico, kube-prometheus-stack 91.9.0 with the shared Alertmanager config, alert logger,
+dashboards, app, and SLO rules. Problems found on the way:
+- etcd stalled on Docker Desktop's WSL disk (546 slow-disk warnings, 18 s apply times). The API server dropped out
+  and kube-state-metrics crash-looped. Fix: `--unsafe-no-fsync` in `kind-config.yaml` (lab only). Kubernetes' own
+  `KubeAPIErrorBudgetBurn` SLO alert caught it and sent a ticket.
+- The chart's `alertmanager.stringConfig` is ignored unless `tplConfig: true`, and that setting would break the
+  Slack templates. So the file is passed as `alertmanager.config`, and the rendered result is checked to be
+  identical to `alertmanager/alertmanager.yml`.
+- On kind, kube-prometheus-stack's scrapes and alerts for etcd, the scheduler, the controller manager and
+  kube-proxy are turned off: kind hides those metrics, so their "Down" alerts would fire forever. Cluster `critical`
+  alerts go to the ticket channel, `warning`/`info` to the logger only, and Watchdog is dropped.
+
 ### 2.1 Schema and data
 
 - [ ] Replace `ddl-auto: update` with **Flyway** migrations, and move catalog seeding into a migration.
@@ -201,7 +216,8 @@ This phase fixes the items in the README's "Known shortcuts" list and adds the c
 
 - [ ] Run 3 replicas with a `PodDisruptionBudget` (`minAvailable: 2`) and `topologySpreadConstraints` across nodes.
       Add a third node to `kind-config.yaml`.
-- [ ] Replace `initialDelaySeconds` with a `startupProbe`.
+- [x] Replace `initialDelaySeconds` with a `startupProbe`. Done 2026-10-03 during bootstrap: on the busy kind
+      cluster, startup took 60-70 s and the 40 s liveness delay killed pods 1.4 s after they logged "Started".
 - [ ] Set up graceful shutdown: `server.shutdown: graceful`, a short `preStop` sleep, and a matching
       `terminationGracePeriodSeconds`.
 - [ ] **Autoscaling.** Start with an HPA on CPU. Then use **KEDA** with a Prometheus trigger on requests/sec,
@@ -218,9 +234,12 @@ This phase fixes the items in the README's "Known shortcuts" list and adds the c
 
 ### 2.4 Packaging and ingress
 
-- [ ] Restructure `k8s/` as **Kustomize**: a `base/` plus `overlays/kind` and later `overlays/eks`.
+- [x] Restructure `k8s/` as **Kustomize**: a `base/` plus `overlays/kind` and later `overlays/eks`.
       Add `overlays/k3s` in Phase 4a and `overlays/eks` in Phase 4b.
       The numbered-file `kubectl apply` in the README becomes `kubectl apply -k`.
+      Done 2026-10-03. `kubectl diff -k` against the running cluster showed only the new `part-of` label, the
+      generated rule files are byte-identical, and applying restarted no pods. Third-party software stays on Helm
+      (kube-prometheus-stack, and later CloudNativePG, KEDA and Sealed Secrets). Your own app uses Kustomize.
 - [ ] Replace port-forwards with ingress-nginx (or Gateway API) on kind, using `extraPortMappings`.
 
 **Done when:** The README's "Known shortcuts" section can be deleted.

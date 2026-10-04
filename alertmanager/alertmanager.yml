@@ -3,17 +3,22 @@
 #   severity=page   -> Slack #alerts-page   (wake someone up, re-notify hourly while it fires)
 #   severity=ticket -> Slack #alerts-ticket (look at it during work hours, re-notify daily)
 #
+#   cluster alerts (kube-prometheus-stack on kind): critical -> #alerts-ticket, warning/info -> logger only,
+#   Watchdog/InfoInhibitor -> dropped
+#
 # Every receiver also posts to alert-logger, a local webhook sink (alertmanager/webhook-logger.py), so routing
 # can be tested with `docker compose logs -f alert-logger` before Slack is set up, or without it.
 #
 # Slack webhook URLs are secrets. They're read from files in alertmanager/secrets/, which git ignores.
-# See alertmanager/secrets/README.md.
+# See alertmanager/secrets/README.md. The same file works in Compose and on kind: both mount the secret files
+# at /etc/alertmanager/secrets/alertmanager-slack/, the path kube-prometheus-stack uses for a Secret of that name.
 
 global:
   resolve_timeout: 5m
 
 templates:
-  - /etc/alertmanager/templates/*.tmpl
+  - /etc/alertmanager/templates/*.tmpl   # Compose
+  - /etc/alertmanager/config/*.tmpl      # kube-prometheus-stack (alertmanager.templateFiles)
 
 route:
   # Anything without a recognized severity goes to the quiet channel rather than being dropped.
@@ -25,6 +30,10 @@ route:
   group_interval: 5m    # how often to send updates when alerts join or leave an existing group
   repeat_interval: 4h
   routes:
+    # Watchdog always fires (it proves the pipeline works); InfoInhibitor only exists to mute info alerts.
+    # Neither should reach a person. A real setup would send Watchdog to an external dead man's switch.
+    - matchers: [alertname=~"Watchdog|InfoInhibitor"]
+      receiver: blackhole
     - matchers: [severity="page"]
       receiver: page
       group_wait: 10s
@@ -33,6 +42,15 @@ route:
       receiver: ticket
       group_wait: 5m
       repeat_interval: 24h
+    # kube-prometheus-stack's cluster alerts use critical/warning/info rather than page/ticket.
+    - matchers: [severity="critical"]
+      receiver: ticket
+      group_by: [alertname, namespace]
+      group_wait: 5m
+      repeat_interval: 24h
+    - matchers: [severity=~"warning|info|none"]
+      receiver: log-only
+      group_by: [alertname, namespace]
 
 inhibit_rules:
   # A page and a ticket for the same SLO describe the same problem. While the page fires, mute the ticket.
@@ -46,7 +64,7 @@ inhibit_rules:
 receivers:
   - name: page
     slack_configs:
-      - api_url_file: /etc/alertmanager/secrets/slack-page-url
+      - api_url_file: /etc/alertmanager/secrets/alertmanager-slack/slack-page-url
         send_resolved: true
         title: '{{ template "storefront.slack.title" . }}'
         text: '{{ template "storefront.slack.text" . }}'
@@ -56,10 +74,17 @@ receivers:
 
   - name: ticket
     slack_configs:
-      - api_url_file: /etc/alertmanager/secrets/slack-ticket-url
+      - api_url_file: /etc/alertmanager/secrets/alertmanager-slack/slack-ticket-url
         send_resolved: true
         title: '{{ template "storefront.slack.title" . }}'
         text: '{{ template "storefront.slack.text" . }}'
     webhook_configs:
       - url: http://alert-logger:8080/ticket
         send_resolved: true
+
+  - name: log-only
+    webhook_configs:
+      - url: http://alert-logger:8080/cluster
+        send_resolved: true
+
+  - name: blackhole

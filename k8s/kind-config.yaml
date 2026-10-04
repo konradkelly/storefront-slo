@@ -1,6 +1,61 @@
+# Local cluster for Phase 2: 1 control plane + 3 workers.
+#   kind create cluster --config k8s/kind-config.yaml
+#
+# - kind's default CNI (kindnet) does not enforce NetworkPolicy, so it's disabled and Calico is installed
+#   instead (README Step 2). Until Calico is running, nodes stay NotReady.
+# - Each worker gets a fake availability zone, so topologySpreadConstraints and "lose a zone" experiments
+#   behave like they will on EKS in Phase 4b.
+# - The control plane maps host ports 80/443 for the ingress controller and is labeled ingress-ready.
+# - etcd runs with --unsafe-no-fsync. On Docker Desktop/WSL every fsync goes through a virtual disk shared by
+#   all nodes, and etcd stalled ("slow fdatasync", 18s apply times) until the API server dropped out and pods
+#   crash-looped. Skipping fsync fixes that, at the cost of possible corruption if the Docker VM crashes.
+#   Lab only. Never do this on a real cluster.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: storefront
+networking:
+  disableDefaultCNI: true
+  podSubnet: 192.168.0.0/16 # Calico's default IP pool
 nodes:
   - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+      - |
+        kind: ClusterConfiguration
+        etcd:
+          local:
+            extraArgs:
+              - name: unsafe-no-fsync
+                value: "true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
   - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-a"
+  - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-b"
+  - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-c"

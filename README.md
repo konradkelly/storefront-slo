@@ -8,7 +8,7 @@ rate lets you break things on purpose and watch the dashboards and alerts react.
 
 ```
 app/          Spring Boot API (products, cart, checkout, fake payments)
-k8s/          kind config, Postgres, API, ServiceMonitor, SLO rules and alerts, k6 load Job
+k8s/          Kustomize base/ (app, Postgres, ServiceMonitor, SLO rules) + overlays/kind; kind config, monitoring values, k6 Job
 prometheus/   Compose scrape config, SLO recording rules, burn-rate alerts, promtool tests
 alertmanager/ routing, inhibition, Slack template, local webhook logger (secrets are gitignored)
 scripts/      gen-k8s-rules.sh: wraps the SLO rules and alerts into PrometheusRules for kind
@@ -92,41 +92,46 @@ On Git Bash for Windows, prefix the `docker run` with `MSYS_NO_PATHCONV=1` and u
 
 ## Step 2: deploy to kind
 
+Prerequisites: `kind`, `kubectl` and `helm` (`winget install Kubernetes.kind Helm.Helm` on Windows), and about
+9 GB of memory for Docker. On Docker Desktop with WSL 2 that's `[wsl2]` / `memory=9GB` in `%USERPROFILE%\.wslconfig`,
+then `wsl --shutdown` and restart Docker Desktop. Stop the Compose stack first (`docker compose down`).
+
 ```bash
-kind create cluster --config k8s/kind-config.yaml
-
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-helm install kps prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
-
-docker build -t storefront-api:dev ./app
-kind load docker-image storefront-api:dev --name storefront
-
-kubectl apply -f k8s/00-namespace.yaml -f k8s/10-postgres.yaml
-kubectl -n storefront rollout status deploy/postgres
-kubectl apply -f k8s/20-storefront-api.yaml -f k8s/30-servicemonitor.yaml \
-  -f k8s/41-slo-rules.yaml -f k8s/42-slo-alerts.yaml
-kubectl -n storefront rollout status deploy/storefront-api
-
-# The kube-prometheus-stack Grafana sidecar loads ConfigMaps labeled grafana_dashboard=1.
-kubectl -n monitoring create configmap storefront-dashboard \n  --from-file=grafana/dashboards/storefront.json --from-file=grafana/dashboards/slo.json
-kubectl -n monitoring label configmap storefront-dashboard grafana_dashboard=1
-
-kubectl -n storefront create configmap k6-script --from-file=loadtest/checkout.js
-kubectl apply -f k8s/50-k6-job.yaml
+bash scripts/kind-up.sh
 ```
+
+The script is safe to rerun. It creates a 4-node cluster ([k8s/kind-config.yaml](k8s/kind-config.yaml): 1 control plane,
+3 workers in fake zones a/b/c), installs Calico (kind's default network plugin doesn't enforce NetworkPolicy) and
+kube-prometheus-stack, loads the Slack secret from `alertmanager/secrets/`, deploys the alert logger and the
+dashboards, then builds, loads and deploys the app with its SLO rules and alerts. Alertmanager on kind uses the same
+`alertmanager/alertmanager.yml` as Compose. Every command names the `kind-storefront` context, so other clusters
+in your kubeconfig are left alone.
 
 Open the UIs:
 
 ```bash
-kubectl -n monitoring port-forward svc/prometheus-operated 9090          # Prometheus
-kubectl -n monitoring port-forward svc/kps-grafana 3000:80               # Grafana (admin)
-kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d
-kubectl -n monitoring port-forward svc/alertmanager-operated 9093        # Alertmanager
+kubectl --context kind-storefront -n monitoring port-forward svc/prometheus-operated 9090     # Prometheus
+kubectl --context kind-storefront -n monitoring port-forward svc/kps-grafana 3000:80          # Grafana (admin/admin)
+kubectl --context kind-storefront -n monitoring port-forward svc/alertmanager-operated 9093   # Alertmanager
+kubectl --context kind-storefront -n monitoring logs -f deploy/alert-logger                   # every notification
 ```
 
-In Prometheus, check **Status > Targets** for `serviceMonitor/storefront/storefront-api`. If it is missing,
+Put load on it:
+
+```bash
+kubectl --context kind-storefront -n storefront create configmap k6-script --from-file=loadtest/checkout.js
+kubectl --context kind-storefront apply -f k8s/loadtest/k6-job.yaml
+```
+
+In Prometheus, check **Status > Targets** for `serviceMonitor/storefront/storefront-api`. If it's missing,
 the `release: kps` label on the ServiceMonitor is the first thing to check.
+
+Two kind-on-Windows problems are already handled in the config. Both were seen when this was first set up:
+
+- **etcd stalls on the virtual disk.** Slow `fsync` through Docker Desktop's WSL disk made etcd time out, the API server
+  drop out, and controllers crash-loop. etcd runs with `--unsafe-no-fsync` (lab only).
+- **Slow JVM startup.** On a busy cluster the app took 60-70 s to start, and a fixed liveness delay killed it just
+  after it came up. A `startupProbe` now gives it up to 3 minutes.
 
 ## Step 3: build the dashboard yourself
 

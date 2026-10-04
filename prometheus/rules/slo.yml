@@ -2,7 +2,7 @@
 #
 # Source of truth for both environments:
 #   - Docker Compose loads this file directly (prometheus/prometheus.yml).
-#   - kind gets k8s/41-slo-rules.yaml, generated from this file by scripts/gen-k8s-rules.sh.
+#   - kind gets k8s/base/slo-rules.yaml, generated from this file by scripts/gen-k8s-rules.sh.
 #
 # Per SLO:
 #   slo:<name>:objective                 the target, e.g. 0.995

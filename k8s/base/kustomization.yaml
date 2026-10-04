@@ -1,0 +1,22 @@
+# The storefront app as plain Kubernetes YAML, shared by every environment. Environment-specific changes
+# (image location, replicas, storage class, ingress) live in overlays/<env>, never here.
+#   kubectl kustomize k8s/overlays/kind        # render
+#   kubectl apply -k k8s/overlays/kind         # apply
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - storefront-api.yaml
+  - servicemonitor.yaml
+  # Generated from prometheus/rules/ by scripts/gen-k8s-rules.sh. Edit the source, not these.
+  - slo-rules.yaml
+  - slo-alerts.yaml
+
+# Added to every resource's metadata, but not to selectors (changing a Deployment's selector forces a
+# delete-and-recreate).
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: storefront
+    includeSelectors: false

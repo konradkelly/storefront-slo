@@ -1,0 +1,61 @@
+# kube-prometheus-stack values for the kind cluster (chart 91.9.0). Installed by scripts/kind-up.sh.
+# The Alertmanager config and Slack template come from alertmanager/ (shared with Compose) via --set-file.
+
+# kind runs etcd, the scheduler, the controller manager and kube-proxy with metrics bound to localhost, so
+# Prometheus can't scrape them and their "...Down" alerts would fire forever. Turn off the scrapes and rules.
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeProxy:
+  enabled: false
+defaultRules:
+  rules:
+    etcd: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeControllerManager: false
+    kubeProxy: false
+    windows: false
+
+prometheus:
+  prometheusSpec:
+    # The SLOs use a 28d window. A lab cluster rarely lives that long, but don't throw data away before then.
+    # Storage is an emptyDir: a Prometheus pod restart starts from empty (fine for a lab).
+    retention: 30d
+    retentionSize: 4GB
+    resources:
+      requests:
+        cpu: 200m
+        memory: 600Mi
+      limits:
+        memory: 1500Mi
+
+alertmanager:
+  alertmanagerSpec:
+    # Slack webhook URLs, created by scripts/kind-up.sh from the gitignored alertmanager/secrets/ files.
+    # Mounted at /etc/alertmanager/secrets/alertmanager-slack/, the path alertmanager.yml reads.
+    secrets:
+      - alertmanager-slack
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+
+grafana:
+  adminPassword: admin # lab only; same as Compose
+  sidecar:
+    dashboards:
+      # Load every ConfigMap labeled grafana_dashboard=1, like the storefront dashboards.
+      enabled: true
+      label: grafana_dashboard
+      folder: /tmp/dashboards
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 200Mi
