@@ -131,10 +131,12 @@ kubectl --context kind-storefront apply -f k8s/loadtest/k6-job.yaml
 In Prometheus, check **Status > Targets** for `serviceMonitor/storefront/storefront-api`. If it's missing,
 the `release: kps` label on the ServiceMonitor is the first thing to check.
 
-Two kind-on-Windows problems are already handled in the config. Both were seen when this was first set up:
+Three kind-on-Windows problems are already handled in the config. All were seen on this setup:
 
 - **etcd stalls on the virtual disk.** Slow `fsync` through Docker Desktop's WSL disk made etcd time out, the API server
   drop out, and controllers crash-loop. etcd runs with `--unsafe-no-fsync` (lab only).
+- **Postgres commits stall on the same disk.** Under checkout load, an occasional seconds-long WAL flush pushed
+  checkout p95 to 2 s. The kind overlay sets `synchronous_commit: "off"` (lab only), which brought p95 to about 240 ms.
 - **Slow JVM startup.** On a busy cluster the app took 60-70 s to start, and a fixed liveness delay killed it just
   after it came up. A `startupProbe` now gives it up to 3 minutes.
 

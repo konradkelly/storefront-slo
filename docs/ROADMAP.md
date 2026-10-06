@@ -236,8 +236,24 @@ dashboards, app, and SLO rules. Problems found on the way:
       With 15s, requests queued on the pool (pending connections peaked at 10) for about 20s instead of failing.
       Replication is async: a failover can lose the last moments of committed writes. Synchronous replication
       would prevent that, but with 2 instances it blocks all writes whenever the standby is down.
-      Rerun with `scripts/experiments/exp3-db-failover.sh`. Separately, checkout-stress at 10 VUs left about 25% of
-      checkouts over 500ms for the whole run on kind's limited CPU, which is what autoscaling in 2.2 should address.
+      Rerun with `scripts/experiments/exp3-db-failover.sh`.
+- [x] **Why checkouts were slow under load on kind** (2026-10-05, checkout-stress at 10 VUs, 5 min, A/B):
+
+      | | default | `synchronous_commit: off` |
+      |---|---|---|
+      | checkout p50 / p95 / p99 | 175 ms / 2.06 s / 5.3 s | 166 ms / 239 ms / 260 ms |
+      | over 500ms | 11.5% | 0.7% |
+      | sampled Postgres sessions waiting on WAL / row locks | 147 / 23 | 1 / 0 |
+
+      It was not CPU: nodes were about 15% busy, the pool never queued, and GC was negligible. Docker Desktop's
+      virtual disk occasionally stalls a WAL flush for seconds; transactions queue behind it, and so do the
+      checkouts waiting on their row locks. The ~170 ms median is by design (the fake payment call is 150 ms).
+      EBS on EKS should not show these stalls. The kind overlay now sets `synchronous_commit: "off"` (lab only, like
+      etcd's `--unsafe-no-fsync`); `base/` keeps the safe default. Verified through the overlay: p95 238 ms, 1.3%
+      over 500ms.
+- [ ] **Unexplained rare multi-second stall.** Even without the WAL waits, one request per 5-minute run still takes
+      10-15 s, and p99 varied between 260 and 844 ms across runs. The source isn't the WAL and isn't CPU; still to be
+      found (candidates: the restock or reservation-sweep jobs, Calico or kube-proxy, a WSL hiccup).
 - [ ] **SLI blind spot found during the failover experiment.** Micrometer only creates a `status="500"` series at the
       first 500, and `increase()`/`rate()` ignore a series' first sample. So the first errors of an incident
       can be missing from every availability SLI. In the first failover run, all 4 errors were invisible to the

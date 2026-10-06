@@ -10,3 +10,23 @@ images:
   - name: storefront-api
     newName: storefront-api
     newTag: dev
+
+patches:
+  # Lab only, like etcd's --unsafe-no-fsync in k8s/kind-config.yaml. Docker Desktop's WSL virtual disk occasionally
+  # stalls a WAL flush for seconds, and every transaction waits behind it (and behind the row locks held while it
+  # waits). Measured 2026-10-05 with checkout-stress at 10 VUs: with the default, checkout p95 was 2.06s, p99 5.3s,
+  # and 11.5% of checkouts took over 500ms; with synchronous_commit off, p95 was 239ms, p99 260ms, 0.7% over 500ms,
+  # at the same throughput and CPU. Off means a commit returns before its WAL reaches disk, so a crash of the Docker
+  # VM can lose the last fraction of a second of commits (no corruption). Never set this in base/ or a cloud overlay.
+  - target:
+      kind: Cluster
+      name: storefront-db
+    patch: |-
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata:
+        name: storefront-db
+      spec:
+        postgresql:
+          parameters:
+            synchronous_commit: "off"
