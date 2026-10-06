@@ -11,6 +11,8 @@ CTX=kind-storefront
 CALICO_VERSION=v3.32.2
 KPS_VERSION=91.9.0
 CNPG_VERSION=0.29.1 # chart; operator 1.30.1
+METRICS_SERVER_VERSION=3.14.0 # chart; app 0.9.0
+KEDA_VERSION=2.21.0
 k() { kubectl --context "$CTX" "$@"; }
 step() { echo; echo "== $*"; }
 
@@ -70,6 +72,20 @@ helm repo update cnpg >/dev/null
 helm upgrade --install cnpg cnpg/cloudnative-pg \
   --kube-context "$CTX" --namespace cnpg-system --create-namespace --version "$CNPG_VERSION" \
   -f k8s/monitoring/cnpg-values.yaml --wait --timeout 5m
+
+step "metrics-server $METRICS_SERVER_VERSION (pod CPU for kubectl top and the KEDA cpu trigger)"
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ >/dev/null 2>&1 || true
+helm repo update metrics-server >/dev/null
+helm upgrade --install metrics-server metrics-server/metrics-server \
+  --kube-context "$CTX" --namespace kube-system --version "$METRICS_SERVER_VERSION" \
+  -f k8s/monitoring/metrics-server-values.yaml --wait --timeout 5m
+
+step "KEDA $KEDA_VERSION (must exist before the storefront ScaledObject)"
+helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
+helm repo update kedacore >/dev/null
+helm upgrade --install keda kedacore/keda \
+  --kube-context "$CTX" --namespace keda --create-namespace --version "$KEDA_VERSION" \
+  -f k8s/monitoring/keda-values.yaml --wait --timeout 5m
 
 step "storefront-api image"
 docker build -q -t storefront-api:dev ./app

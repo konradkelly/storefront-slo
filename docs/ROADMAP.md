@@ -254,6 +254,11 @@ dashboards, app, and SLO rules. Problems found on the way:
 - [ ] **Unexplained rare multi-second stall.** Even without the WAL waits, one request per 5-minute run still takes
       10-15 s, and p99 varied between 260 and 844 ms across runs. The source isn't the WAL and isn't CPU; still to be
       found (candidates: the restock or reservation-sweep jobs, Calico or kube-proxy, a WSL hiccup).
+      Seen again on 2026-10-06: a 5 s prober timeout with no disruption running, and k6 maxima of 12.5 s and 19.6 s.
+      The exp5 HPA run also reported a *negative* minimum request duration (-0.52 s), so the clock inside the cluster
+      jumped backwards. WSL is known to correct its clock in jumps. That makes clock jumps the leading suspect:
+      some "stalls" may be measurement artifacts. Next step: compare app-side duration (Micrometer) with k6's for
+      the same slow request, and check `chronyc`/`dmesg` for clock steps.
 - [ ] **SLI blind spot found during the failover experiment.** Micrometer only creates a `status="500"` series at the
       first 500, and `increase()`/`rate()` ignore a series' first sample. So the first errors of an incident
       can be missing from every availability SLI. In the first failover run, all 4 errors were invisible to the
@@ -262,14 +267,54 @@ dashboards, app, and SLO rules. Problems found on the way:
 
 ### 2.2 Availability during change
 
-- [ ] Run 3 replicas with a `PodDisruptionBudget` (`minAvailable: 2`) and `topologySpreadConstraints` across nodes.
+- [x] Run 3 replicas with a `PodDisruptionBudget` (`minAvailable: 2`) and `topologySpreadConstraints` across nodes.
       Add a third node to `kind-config.yaml`.
+      Done 2026-10-06. Spread is a hard rule across zones and a soft rule across nodes, with `matchLabelKeys:
+      [pod-template-hash]` so each rollout spreads its own pods, and rollouts never drop below 3 (`maxSurge: 1`,
+      `maxUnavailable: 0`). Found in exp4: with one node per zone, draining zone-b's only node left the
+      replacement Pending, because placing it in zone a or c would put that zone 2 ahead of the empty zone b. The PDB
+      kept 2 serving, so there were no errors, but capacity was reduced. Fixed with `nodeTaintsPolicy: Honor` (a
+      cordoned node's zone leaves the calculation): the replacement went to zone c and was Ready in 56 s. Kubernetes
+      doesn't rebalance afterwards; the next rollout does.
 - [x] Replace `initialDelaySeconds` with a `startupProbe`. Done 2026-10-03 during bootstrap: on the busy kind
       cluster, startup took 60-70 s and the 40 s liveness delay killed pods 1.4 s after they logged "Started".
-- [ ] Set up graceful shutdown: `server.shutdown: graceful`, a short `preStop` sleep, and a matching
+- [x] Set up graceful shutdown: `server.shutdown: graceful`, a short `preStop` sleep, and a matching
       `terminationGracePeriodSeconds`.
-- [ ] **Autoscaling.** Start with an HPA on CPU. Then use **KEDA** with a Prometheus trigger on requests/sec,
+      Done 2026-10-06: a 10 s `preStop` sleep (the native `sleep` action) covers kube-proxy updating each node's
+      rules, then Spring drains in-flight requests for up to 20 s, inside a 45 s grace period. Verified: deleted at
+      06:10:44.6, "Commencing graceful shutdown" about 10 s later, pod gone after 13.5 s.
+
+      **Disruption experiment** (`scripts/experiments/exp4-disruption.sh`, checkout-stress at 10 VUs, prober):
+
+      | | before (1 replica) | after (3 replicas, PDB, zone spread, graceful shutdown) |
+      |---|---|---|
+      | rolling restart | 1 failed request | 0 |
+      | drain of the node running the app | 24 failed (about 19 s outage) | 0 (replacement Pending 10 min, 2 pods kept serving) |
+      | k6 total | 49 of 11,356 failed, 6 failed checkouts | 0 of 11,519 |
+- [x] **Autoscaling.** Start with an HPA on CPU. Then use **KEDA** with a Prometheus trigger on requests/sec,
       so the service scales on the same metrics the SLOs use.
+      Done 2026-10-06 with metrics-server 3.14.0 and KEDA 2.21.0. `k8s/base/autoscaling.yaml` is a ScaledObject
+      targeting 25 req/s per pod with CPU at 70% as a backstop, between 3 and 6 pods. The Deployment has no
+      `replicas` field. Handing the count over without a scale-down: `kubectl apply set-last-applied` with the
+      replica-less manifest first, otherwise apply would reset it to 1.
+
+      **Autoscaling experiment** (`scripts/experiments/exp5-autoscale.sh`, 60 VUs of checkout-stress for 8 min):
+
+      | | CPU HPA (70%) | KEDA: requests + CPU backstop |
+      |---|---|---|
+      | scaled to | 6 (max), Ready about 90 s after load start | 6 (max), Ready about 110 s after load start |
+      | first ~2.5 min checkout p95 | 0.31-0.48 s | 0.8-1.8 s |
+      | steady checkout p95 (~110 req/s) | 0.23-0.26 s | 0.23-0.24 s |
+      | back to 3 after load stopped | ~5 min | ~4 min |
+      | failed requests | 0 of 49,015 | 0 of 47,527 |
+
+      In both runs the CPU signal set the count. When 60 VUs arrived at once, the 3 warm pods hit about 1 core each
+      (the JVM compiling newly hot code while serving a burst), so CPU asked for the max within 35 s. Request rate
+      alone would have asked for 4-5. Once warm, the 6 pods ran at 30-60% of the CPU target, so about one pod was
+      over-provisioned until the 5-minute scale-down window ended. Kept: request rate plus the CPU backstop, since
+      the backstop covered the burst that request rate under-reacts to. The p95 gap in the first minutes is
+      probably run-to-run noise, since both runs reached 6 desired replicas in about 35 s; it would need repeated
+      runs to tell apart.
 
 ### 2.3 Security baseline
 

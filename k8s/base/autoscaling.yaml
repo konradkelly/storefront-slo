@@ -1,0 +1,31 @@
+# KEDA scales storefront-api on request rate (the same Prometheus metric the SLOs use), with CPU as a backstop.
+# KEDA creates and manages an HPA from this (keda-hpa-storefront-api); never add a second HPA for the Deployment.
+# The Deployment has no `replicas` field, because this owns the count.
+#
+# Why not CPU alone (the earlier hpa.yaml, exp5 on 2026-10-06): starting JVMs burn 1-2 cores each while warming up,
+# which reads as load. Under a 60-VU spike the CPU HPA went straight to its max of 6, then ran 6 warm pods at
+# 28-60% of target. Request rate doesn't count warm-up. And when latency came from the database, CPU stayed at ~15%,
+# so a CPU autoscaler would not have reacted at all.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: storefront-api
+  namespace: storefront
+spec:
+  scaleTargetRef:
+    name: storefront-api
+  minReplicaCount: 3 # one per zone
+  maxReplicaCount: 6 # bounded by the kind cluster's memory (~330Mi per pod)
+  triggers:
+    # Requests per second across the app, divided by replicas, aiming for 25 per pod (a warm pod handled ~18 at
+    # ~100m CPU in exp5, so 25 stays under the 70% CPU target).
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-operated.monitoring.svc:9090
+        query: sum(rate(http_server_requests_seconds_count{application="storefront-api", uri!~"/actuator.*"}[1m]))
+        threshold: "25"
+    # Backstop for requests that are unusually expensive.
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"

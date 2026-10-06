@@ -1,6 +1,10 @@
 spring:
   application:
     name: storefront-api
+  lifecycle:
+    # How long graceful shutdown waits for in-flight requests (k8s terminationGracePeriodSeconds covers this
+    # plus the preStop sleep).
+    timeout-per-shutdown-phase: 20s
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/storefront}
     username: ${DB_USER:storefront}
@@ -14,6 +18,11 @@ spring:
   flyway:
     placeholders:
       initial_stock: ${storefront.restock-level}
+
+server:
+  # On SIGTERM: stop accepting new requests, finish the ones in flight, then exit. Spring Boot 3.3 defaults to
+  # "immediate", which drops in-flight requests during every rolling update.
+  shutdown: graceful
 
 management:
   endpoints:

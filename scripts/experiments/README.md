@@ -9,11 +9,14 @@ material for a postmortem ([template](../../docs/postmortem-template.md)).
 | `exp1-fast-burn.sh` | 30% payment failures until the page fires, +5 min, then recovers and watches 40 min | Page in about 9 min, clears about 26 min after recovery. Done, see [postmortem](../../docs/postmortems/2026-10-02-payment-outage-fast-burn.md) | ~1h55m |
 | `exp2-slow-burn.sh` | 2% payment failures (4x burn) until the ticket fires, +30 min | Ticket after ~16 min, **no page**, old `> 5% for 5m` threshold never crosses | ~1h50m |
 | `exp3-db-failover.sh` | kind only: checkout-stress load, delete the CloudNativePG primary after 3 min, timeline the failover | With `smartShutdownTimeout: 15`: new primary at +43s, 2 failed requests, 0 failed checkouts (see docs/ROADMAP.md 2.1) | ~13m |
+| `exp4-disruption.sh` | kind only: checkout-stress load, a rolling restart, then a drain of one node's app pods; `prober.py` logs every failure with a timestamp | Before Phase 2.2 (1 replica): 26 failures (24 during the drain). After (3 replicas, PDB, zone spread, graceful shutdown): 0 | ~12m |
+| `exp5-autoscale.sh` | kind only: 8 min of heavy checkout load, then 6 min idle; logs replicas, autoscaler metrics, pod CPU and checkout p95 every 15s | See docs/ROADMAP.md 2.2 for CPU HPA vs KEDA | ~15m |
 
 ## Before you run one
 
-The notes below are for experiments 1 and 2, which run on Compose. Experiment 3 runs on kind (`scripts/kind-up.sh`),
-clears nothing, and leaves the database cluster healthy again by the end (the deleted pod returns as the standby).
+The notes below are for experiments 1 and 2, which run on Compose. Experiments 3-5 run on kind (`scripts/kind-up.sh`)
+and clear nothing. Experiment 3 leaves the database cluster healthy again by the end (the deleted pod returns as the
+standby), and experiment 4 uncordons the node it drained.
 
 - **It clears Prometheus storage** (`docker compose rm -sfv prometheus`) so old data doesn't skew the numbers, and
   recreates the API with a different `PAYMENT_FAILURE_RATE`. Real Slack notifications go out.

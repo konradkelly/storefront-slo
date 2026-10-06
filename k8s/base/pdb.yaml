@@ -1,0 +1,13 @@
+# Voluntary disruptions (node drains, cluster upgrades, autoscaler scale-down) go through the eviction API, which
+# refuses to evict a storefront-api pod if that would leave fewer than 2 Ready. A drain then waits for a replacement
+# to come up elsewhere before taking the next one. This doesn't protect against involuntary loss (a node crash).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: storefront-api
+  namespace: storefront
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: storefront-api

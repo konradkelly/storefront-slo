@@ -1,0 +1,6 @@
+# metrics-server values (chart 3.14.0, app 0.9.0). Installed by scripts/kind-up.sh into kube-system.
+# It feeds pod CPU/memory to the resource metrics API, which `kubectl top` and CPU-based autoscaling read.
+args:
+  # kind's kubelets serve self-signed certificates. Lab only: a real cluster has kubelet certs signed by the
+  # cluster CA, and metrics-server should verify them.
+  - --kubelet-insecure-tls

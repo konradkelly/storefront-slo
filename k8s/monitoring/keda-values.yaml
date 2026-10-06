@@ -1,0 +1,12 @@
+# KEDA values (chart 2.21.0). Installed by scripts/kind-up.sh into the keda namespace.
+# KEDA turns ScaledObjects (k8s/base/autoscaling.yaml) into an HPA fed with external metrics, here a Prometheus query.
+resources:
+  operator:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  metricServer:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 512Mi }
+  webhooks:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 256Mi }

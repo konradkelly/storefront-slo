@@ -9,6 +9,8 @@ resources:
   - namespace.yaml
   - postgres.yaml
   - storefront-api.yaml
+  - pdb.yaml
+  - autoscaling.yaml
   - servicemonitor.yaml
   # Generated from prometheus/rules/ by scripts/gen-k8s-rules.sh. Edit the source, not these.
   - slo-rules.yaml
