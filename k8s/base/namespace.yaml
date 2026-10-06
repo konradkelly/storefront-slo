@@ -1,4 +1,13 @@
+# Pod Security Admission: the API server rejects any pod in this namespace that doesn't meet the "restricted"
+# profile (non-root, no privilege escalation, all capabilities dropped, a seccomp profile). warn and audit report
+# the same checks to kubectl users and to the audit log. The CloudNativePG instance pods already comply; the app,
+# the k6 Job and the experiment prober set matching securityContexts.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: storefront
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

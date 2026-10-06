@@ -24,8 +24,8 @@ import sys,yaml
 d=yaml.safe_load(sys.stdin)
 d['spec']['template']['spec']['containers'][0]['env'] += [{'name':'VUS','value':'10'},{'name':'DURATION','value':'11m'}]
 print(yaml.safe_dump(d))" | k apply -f - >/dev/null
-k -n storefront run prober --image=python:3.13.16-alpine --restart=Never --env=DURATION_S=660 \
-  --overrides='{"spec":{"containers":[{"name":"prober","image":"python:3.13.16-alpine","command":["python","-u","/app/prober.py"],"env":[{"name":"DURATION_S","value":"660"}],"volumeMounts":[{"name":"s","mountPath":"/app"}]}],"volumes":[{"name":"s","configMap":{"name":"prober-script"}}]}}' >/dev/null
+k -n storefront run prober --image=python:3.13.16-alpine --restart=Never --env=DURATION_S=660 --labels=app.kubernetes.io/component=loadtest \
+  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"prober","image":"python:3.13.16-alpine","command":["python","-u","/app/prober.py"],"env":[{"name":"DURATION_S","value":"660"}],"securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}},"volumeMounts":[{"name":"s","mountPath":"/app"}]}],"volumes":[{"name":"s","configMap":{"name":"prober-script"}}]}}' >/dev/null
 k -n storefront wait --for=condition=Ready pod/prober --timeout=120s >/dev/null
 event "load + prober started; replicas=$(k -n storefront get deploy storefront-api -o jsonpath='{.spec.replicas}'), pdb=$(k -n storefront get pdb -o name 2>/dev/null | tr '\n' ' ')"
 sleep 120

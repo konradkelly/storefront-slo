@@ -1,0 +1,144 @@
+# NetworkPolicies for the storefront namespace: deny everything, then allow only the conversations the system needs.
+# Enforced by Calico on kind (kind's default network plugin ignores NetworkPolicy silently). Verified both ways,
+# allowed paths work and others are blocked, with scripts/netpol-check.sh.
+#
+#   loadtest (k6, prober) ──8080──▶ storefront-api ──5432──▶ storefront-db ◀──5432──▶ storefront-db (replication)
+#   Prometheus (monitoring) ──8080──▶ storefront-api        ▲  ▲
+#   Prometheus (monitoring) ──9187──────────────────────────┘  │
+#   CloudNativePG operator (cnpg-system) ──8000 (status)───────┘
+#   storefront-db ──6443/443──▶ Kubernetes API (the CNPG instance manager inside each pod)
+#   every pod ──53──▶ CoreDNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: storefront
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: storefront
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storefront-api
+  namespace: storefront
+spec:
+  podSelector:
+    matchLabels:
+      app: storefront-api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: loadtest
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 8080 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: storefront-db
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storefront-db
+  namespace: storefront
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: storefront-db
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # The app, and the other instance (streaming replication, pg_rewind).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: storefront-api
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: storefront-db
+      ports:
+        - { protocol: TCP, port: 5432 }
+    # The operator polls each instance's status endpoint, and other instances use it during failover.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: storefront-db
+      ports:
+        - { protocol: TCP, port: 8000 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 9187 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: storefront-db
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 8000 }
+    # The Kubernetes API. Its address differs per cluster (172.31.0.4:6443 on kind; something else on EKS), so this
+    # allows the ports to any destination instead of pinning an IP. A cloud overlay can narrow it to the API's CIDR.
+    - ports:
+        - { protocol: TCP, port: 6443 }
+        - { protocol: TCP, port: 443 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: loadtest
+  namespace: storefront
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: loadtest
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: storefront-api
+      ports:
+        - { protocol: TCP, port: 8080 }

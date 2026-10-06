@@ -128,6 +128,10 @@ kubectl --context kind-storefront -n storefront create configmap k6-script --fro
 kubectl --context kind-storefront apply -f k8s/loadtest/k6-job.yaml
 ```
 
+The `storefront` namespace enforces Pod Security `restricted`, and NetworkPolicies deny all traffic except the
+paths the app needs. Check both directions with `bash scripts/netpol-check.sh`. A new pod or Job there needs a
+restricted-compliant `securityContext`, and the `app.kubernetes.io/component: loadtest` label if it should reach the app.
+
 In Prometheus, check **Status > Targets** for `serviceMonitor/storefront/storefront-api`. If it's missing,
 the `release: kps` label on the ServiceMonitor is the first thing to check.
 

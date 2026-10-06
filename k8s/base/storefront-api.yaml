@@ -43,10 +43,29 @@ spec:
       # Shutdown budget: 10s preStop sleep + up to 20s for Spring to finish in-flight requests
       # (spring.lifecycle.timeout-per-shutdown-phase) + margin.
       terminationGracePeriodSeconds: 45
+      # Pod Security "restricted" (the namespace enforces it). The image already runs as UID 10001; runAsNonRoot makes
+      # the kubelet refuse to start it as root anyway.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        # The root filesystem is read-only. Tomcat's work dir and the JVM's perf data go to java.io.tmpdir (/tmp).
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
       containers:
         - name: storefront-api
           image: storefront-api # each overlay sets the registry and tag
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           ports:
             - name: http
               containerPort: 8080
