@@ -1,0 +1,51 @@
+# Disposable smoke-test environment: same app/probes/security, one pod and an
+# ephemeral Postgres. Operators/monitoring/Gateway are tested in the kind lab.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - postgres.yaml
+images:
+  - name: storefront-api
+    newName: storefront-api
+    newTag: ci
+patches:
+  - path: remove-operators.yaml
+  - target:
+      kind: Deployment
+      name: storefront-api
+    patch: |-
+      - op: add
+        path: /spec/replicas
+        value: 1
+      - op: remove
+        path: /spec/template/spec/topologySpreadConstraints
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: RESTOCK_LEVEL, value: "100000"}
+  - target:
+      kind: Deployment
+      name: storefront-api
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: storefront-api
+      spec:
+        template:
+          spec:
+            containers:
+              - name: storefront-api
+                env:
+                  - name: PAYMENT_FAILURE_RATE
+                    value: "0"
+  - target:
+      kind: PodDisruptionBudget
+      name: storefront-api
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1

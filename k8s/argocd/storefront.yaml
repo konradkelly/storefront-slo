@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: storefront
+  namespace: argocd
+spec:
+  sourceRepos:
+    - https://github.com/konradkelly/storefront-slo.git
+  destinations:
+    - namespace: storefront
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: storefront
+  namespace: argocd
+spec:
+  project: storefront
+  source:
+    repoURL: https://github.com/konradkelly/storefront-slo.git
+    targetRevision: main
+    path: k8s/overlays/kind-gitops
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: storefront
+  syncPolicy:
+    automated:
+      selfHeal: true
+      # Keep database/namespace deletion out of unattended reconciliation.
+      prune: false
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    # KEDA owns the Deployment count; Argo CD must not reset it during sync.
+    - group: apps
+      kind: Deployment
+      name: storefront-api
+      namespace: storefront
+      jsonPointers:
+        - /spec/replicas

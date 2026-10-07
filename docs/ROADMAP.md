@@ -388,18 +388,41 @@ Done in 2.2 (`scripts/experiments/exp4-disruption.sh`): 26 failed requests befor
 
 ### 3.1 CI (GitHub Actions)
 
-- [ ] On every PR: `mvn verify` (Testcontainers), `promtool check rules` plus `promtool test rules`,
+- [x] On every PR: `mvn verify` (Testcontainers), `promtool check rules` plus `promtool test rules`,
       `kubeconform` on the rendered Kustomize output, and a lint pass (`kube-linter` or `checkov`).
+      Implemented 2026-10-07 in `.github/workflows/ci.yml`, also on pushes to main and manual dispatch.
+      Checks generated SLO manifests for drift, validates custom resources without skipping missing schemas,
+      and lints the rendered kind overlay. Tools/actions and the CRD catalog are pinned; Java test reports
+      are uploaded even after failures. Local schema/lint/drift checks passed. After launching Docker Desktop,
+      `mvn verify` passed in the Java 21 Maven container (15 tests, no failures/errors/skips), and promtool
+      checked all 49 rules and passed both rule-test files. The first hosted workflow run is still pending.
 - [ ] On main: build the image, push it to **GHCR** tagged with the git SHA, scan it with **Trivy**
       (fail on HIGH/CRITICAL), generate an SBOM, and sign it with **cosign** (keyless).
-- [ ] **Smoke test in CI:** create a kind cluster (`helm/kind-action`), deploy, and run a 2-minute k6 test whose
+      Implemented locally 2026-10-07 in `.github/workflows/release.yml`, gated on successful main CI.
+      Publishes SHA tags, signs/attests the registry digest, and promotes it through a Git commit.
+      Local Trivy scan of the current Spring Boot 3.3.4 image found 42 HIGH/CRITICAL Java dependency findings;
+      publication remains blocked until dependencies pass the gate. No vulnerabilities are waived.
+      Workflow execution/GHCR publication/signing still need a hosted run. Setup: [delivery.md](delivery.md).
+- [x] **Smoke test in CI:** create a kind cluster (`helm/kind-action`), deploy, and run a 2-minute k6 test whose
       `thresholds` mirror the SLOs (`http_req_failed<0.005`, `p(99)<500` on checkout). The pipeline fails
       when the SLO would.
+      Implemented locally in CI with a disposable `overlays/ci`, 30-second warm-up and a two-minute k6 run.
+      Checkout 402/5xx/transport errors are explicitly bad, and the deterministic fixture also requires 201.
+      Local smoke passed: 516 checkouts, 0 failed requests, checkout p99 233 ms. CI's ephemeral Postgres
+      uses `synchronous_commit=off`, matching kind's virtual-disk workaround; the same gate correctly failed
+      with synchronous commits (p99 765 ms). Bootstrap reruns restart the app after database readiness so
+      Flyway recreates the schema if the disposable database has changed. Hosted execution still pending.
+      Negative test: 65 payment failures (402), generic HTTP failure rate 0%, checkout error ratio 100%.
+      The checkout availability threshold rejected the Job as intended.
 
 ### 3.2 GitOps
 
 - [ ] Install **Argo CD** on the cluster to sync `overlays/kind` from this repo. CI then updates the image tag
       in the overlay instead of running `kubectl`.
+      Bootstrap and restricted Project/Application authored in `scripts/argocd-up.sh` and `k8s/argocd/`.
+      It tracks registry-backed `overlays/kind-gitops` (local `overlays/kind` retains `:dev` image loads),
+      ignores KEDA-owned replicas, and enables self-healing without pruning. Awaiting the first passing release
+      before installation/application sync; the placeholder image is guarded by the bootstrap script.
 - [ ] Manage kube-prometheus-stack and CloudNativePG as Argo CD Applications too
       (app-of-apps), so the whole cluster can be rebuilt from git.
 

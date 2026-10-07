@@ -1,0 +1,78 @@
+# Disposable credentials and emptyDir, exclusively for the CI cluster.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: storefront-db-app
+  namespace: storefront
+stringData:
+  username: storefront
+  password: ci-only-password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storefront-db-rw
+  namespace: storefront
+spec:
+  selector:
+    cnpg.io/cluster: storefront-db
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront-db
+  namespace: storefront
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      cnpg.io/cluster: storefront-db
+  template:
+    metadata:
+      labels:
+        cnpg.io/cluster: storefront-db
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16.14
+          # Disposable lab data: match kind's WAL-flush workaround. This gate
+          # exercises app regressions, not durability of Docker Desktop storage.
+          args: [postgres, -c, synchronous_commit=off]
+          env:
+            - name: POSTGRES_DB
+              value: storefront
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: {name: storefront-db-app, key: username}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: storefront-db-app, key: password}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: tmp, mountPath: /tmp}
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, storefront, -d, storefront]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: run, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}

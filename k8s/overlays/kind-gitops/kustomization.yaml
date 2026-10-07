@@ -1,0 +1,10 @@
+# Registry-backed kind environment. Keep overlays/kind for local dev image loads.
+# Release replaces the SHA tag with the signed image digest after a successful CI.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../kind
+images:
+  - name: storefront-api
+    newName: ghcr.io/konradkelly/storefront-slo
+    newTag: awaiting-first-release

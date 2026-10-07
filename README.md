@@ -85,6 +85,28 @@ Tests run the app against a real Postgres through Testcontainers, so Docker must
 cd app && mvn verify
 ```
 
+GitHub Actions runs four independent checks on every PR and push to `main` (also available through
+**Run workflow**): Java 21 integration tests, Prometheus rule syntax/unit tests plus generated-rule drift,
+Kubernetes schema validation/linting, and a two-minute Kubernetes SLO smoke test after warm-up.
+Java test reports are saved as an artifact even on failures.
+The workflow needs no cluster credentials or Slack secrets. Repository branch protection can require
+`Java integration tests`, `Prometheus rules`, `Kubernetes manifests`, and `Kubernetes SLO smoke test` before merging.
+
+To run the manifest check locally, install kubectl 1.34.1, kubeconform 0.8.0 and kube-linter 0.8.3 on your PATH:
+
+```bash
+bash scripts/ci-k8s-check.sh
+```
+
+The check renders the base, kind, kind-gitops and CI overlays, and validates them plus Argo CD, the Gateway,
+alert logger and k6 Job.
+Custom-resource schemas come from a pinned CRD catalog revision; missing schemas fail the check.
+Linting covers the deployable kind overlays, with documented exceptions in `.kube-linter.yaml` for CPU limits
+and the existing PDB eviction policy. The supporting manifests receive schema validation only.
+The Release workflow adds GHCR publishing, vulnerability gating, an SBOM, keyless signatures and Git image
+promotion after successful main CI. Argo CD bootstrap/manifests are included for the registry-backed kind
+overlay. First-release setup and the remaining GitOps/canary work are described in [docs/delivery.md](docs/delivery.md).
+
 The SLO recording rules and burn-rate alerts ([docs/slo.md](docs/slo.md)) live in `prometheus/rules/`. Compose
 loads them directly. After editing them, run the unit tests and regenerate the kind copies:
 

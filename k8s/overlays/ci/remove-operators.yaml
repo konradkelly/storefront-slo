@@ -1,0 +1,48 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: storefront-db
+  namespace: storefront
+$patch: delete
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: storefront-db
+  namespace: storefront
+$patch: delete
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: storefront-api
+  namespace: storefront
+$patch: delete
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storefront-slo-rules
+  namespace: storefront
+$patch: delete
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storefront-slo-alerts
+  namespace: storefront
+$patch: delete
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: storefront-api
+  namespace: storefront
+$patch: delete
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: storefront-api
+  namespace: storefront
+$patch: delete

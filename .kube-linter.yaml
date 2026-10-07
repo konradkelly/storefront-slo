@@ -1,0 +1,17 @@
+# CPU limits are deliberately omitted: throttling can hurt checkout latency.
+# CPU requests and both memory requests/limits are still checked.
+customChecks:
+  - name: require-cpu-request
+    template: cpu-requirements
+    params:
+      requirementsType: request
+      upperBoundMillis: 0
+    remediation: Set a positive CPU request so scheduling and the CPU autoscaler work.
+checks:
+  include:
+    - require-cpu-request
+  exclude:
+    - unset-cpu-requirements
+    # Preserve the current IfHealthyBudget default. Changing eviction behavior
+    # belongs in a separate availability experiment, not a CI bootstrap.
+    - pdb-unhealthy-pod-eviction-policy
