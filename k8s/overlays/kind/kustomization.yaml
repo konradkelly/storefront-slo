@@ -12,6 +12,14 @@ images:
     newTag: dev
 
 patches:
+  # The public hostname for the app route (base/httproute.yaml). *.localhost resolves to 127.0.0.1.
+  - target:
+      kind: HTTPRoute
+      name: storefront-api
+    patch: |-
+      - op: add
+        path: /spec/hostnames
+        value: [storefront.localhost]
   # Lab only, like etcd's --unsafe-no-fsync in k8s/kind-config.yaml. Docker Desktop's WSL virtual disk occasionally
   # stalls a WAL flush for seconds, and every transaction waits behind it (and behind the row locks held while it
   # waits). Measured 2026-10-05 with checkout-stress at 10 VUs: with the default, checkout p95 was 2.06s, p99 5.3s,

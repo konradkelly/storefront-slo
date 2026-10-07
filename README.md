@@ -112,14 +112,17 @@ dashboards, then builds, loads and deploys the app with its SLO rules and alerts
 `alertmanager/alertmanager.yml` as Compose. Every command names the `kind-storefront` context, so other clusters
 in your kubeconfig are left alone.
 
-Open the UIs:
+Everything is reachable on port 80 through the cluster's Gateway (Envoy Gateway, `k8s/gateway/`). No port-forwards are
+needed, and `*.localhost` resolves to 127.0.0.1 without any hosts-file entries:
 
-```bash
-kubectl --context kind-storefront -n monitoring port-forward svc/prometheus-operated 9090     # Prometheus
-kubectl --context kind-storefront -n monitoring port-forward svc/kps-grafana 3000:80          # Grafana (admin/admin)
-kubectl --context kind-storefront -n monitoring port-forward svc/alertmanager-operated 9093   # Alertmanager
-kubectl --context kind-storefront -n monitoring logs -f deploy/alert-logger                   # every notification
-```
+| URL | What |
+|-----|------|
+| http://storefront.localhost/products | the API (only `/products`, `/cart`, `/orders`; `/actuator` stays internal) |
+| http://grafana.localhost | Grafana (admin/admin) |
+| http://prometheus.localhost | Prometheus |
+| http://alertmanager.localhost | Alertmanager |
+
+Every notification also goes to the alert logger: `kubectl --context kind-storefront -n monitoring logs -f deploy/alert-logger`.
 
 Put load on it:
 
@@ -190,7 +193,18 @@ Each `set env` triggers a rollout. Predict what you'll see before running it.
 
 Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 CHECKOUT_MODE=saga`.
 
-## Known shortcuts (fine for learning, not for production)
+## Lab-only settings and known gaps
 
-- Compose uses fixed lab credentials (`storefront`/`storefront`) in `docker-compose.yml`. On kind, CloudNativePG
-  generates the database credentials, so none are in git.
+The original shortcuts (emptyDir Postgres, `ddl-auto` schema, a single replica, plaintext credentials in git) are fixed.
+What's left is deliberate and limited to the lab, or not built yet.
+
+Lab-only (kind or Compose, never in `k8s/base/`):
+- etcd `--unsafe-no-fsync` and Postgres `synchronous_commit: off`, to work around Docker Desktop's slow virtual disk
+  (`k8s/kind-config.yaml`, `k8s/overlays/kind/`). A crash of the Docker VM can lose the last moments of writes.
+- metrics-server `--kubelet-insecure-tls`, because kind's kubelets use self-signed certificates.
+- Grafana `admin/admin`, and Compose's fixed database credentials (`storefront`/`storefront`).
+
+Not built yet:
+- TLS on the Gateway (HTTP only; port 443 is mapped but unused).
+- Database backups and a WAL archive. After an unclean restart, an instance that diverged had to be rebuilt instead
+  of rewound (docs/ROADMAP.md 2.3).

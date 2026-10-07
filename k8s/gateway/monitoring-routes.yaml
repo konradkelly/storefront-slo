@@ -1,0 +1,35 @@
+# kind only: the monitoring UIs through the Gateway instead of port-forwards. *.localhost resolves to 127.0.0.1 in
+# browsers and curl, so no hosts-file entries are needed. These UIs have no login in front of them (Grafana has
+# admin/admin), which is fine on a laptop and never on a shared cluster.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  parentRefs: [{ name: storefront, namespace: gateway }]
+  hostnames: [grafana.localhost]
+  rules:
+    - backendRefs: [{ name: kps-grafana, port: 80 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  parentRefs: [{ name: storefront, namespace: gateway }]
+  hostnames: [prometheus.localhost]
+  rules:
+    - backendRefs: [{ name: kps-kube-prometheus-stack-prometheus, port: 9090 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  parentRefs: [{ name: storefront, namespace: gateway }]
+  hostnames: [alertmanager.localhost]
+  rules:
+    - backendRefs: [{ name: kps-kube-prometheus-stack-alertmanager, port: 9093 }]

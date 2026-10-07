@@ -1,0 +1,77 @@
+# The cluster's front door on kind: Gateway API, implemented by Envoy Gateway (chart 1.9.2, installed by
+# scripts/kind-up.sh). ingress-nginx, the roadmap's first choice, was retired in March 2026 (no further security
+# fixes), and the Kubernetes project points to Gateway API as the replacement.
+#
+# Getting traffic in on kind: there's no cloud load balancer, but k8s/kind-config.yaml maps the host's ports 80/443
+# to the control-plane node (labeled ingress-ready=true). So the Envoy proxy runs on that node and claims hostPort 80.
+# Envoy runs without root, so the Gateway's port-80 listener binds 10080 inside the pod; hostPort 80 maps to that.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: kind-hostport
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: ClusterIP # no LoadBalancer on kind; traffic arrives through the hostPort
+      envoyDeployment:
+        replicas: 1
+        pod:
+          nodeSelector:
+            ingress-ready: "true"
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: envoy
+                      ports:
+                        - containerPort: 10080
+                          hostPort: 80
+                          protocol: TCP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: kind-hostport
+    namespace: envoy-gateway-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: storefront
+  namespace: gateway
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      # Only these namespaces may attach routes, so a route created anywhere else can't publish itself.
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [storefront, monitoring]

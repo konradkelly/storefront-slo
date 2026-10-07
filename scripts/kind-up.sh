@@ -13,6 +13,7 @@ KPS_VERSION=91.9.0
 CNPG_VERSION=0.29.1 # chart; operator 1.30.1
 METRICS_SERVER_VERSION=3.14.0 # chart; app 0.9.0
 KEDA_VERSION=2.21.0
+ENVOY_GATEWAY_VERSION=1.9.2 # Gateway API implementation; ingress-nginx was retired in March 2026
 k() { kubectl --context "$CTX" "$@"; }
 step() { echo; echo "== $*"; }
 
@@ -87,6 +88,13 @@ helm upgrade --install keda kedacore/keda \
   --kube-context "$CTX" --namespace keda --create-namespace --version "$KEDA_VERSION" \
   -f k8s/monitoring/keda-values.yaml --wait --timeout 5m
 
+step "Envoy Gateway $ENVOY_GATEWAY_VERSION + the cluster Gateway (must exist before the storefront HTTPRoute)"
+helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm --version "$ENVOY_GATEWAY_VERSION" \
+  --kube-context "$CTX" --namespace envoy-gateway-system --create-namespace --wait --timeout 6m
+k apply -f k8s/gateway/gateway.yaml
+k -n gateway wait --for=condition=Programmed gateway/storefront --timeout=600s
+k apply -f k8s/gateway/monitoring-routes.yaml
+
 step "storefront-api image"
 docker build -q -t storefront-api:dev ./app
 kind load docker-image storefront-api:dev --name storefront
@@ -98,7 +106,8 @@ k -n storefront rollout restart deploy/storefront-api >/dev/null # pick up a fre
 k -n storefront rollout status deploy/storefront-api --timeout=300s
 
 step "done"
-echo "Prometheus:    kubectl --context $CTX -n monitoring port-forward svc/prometheus-operated 9090"
-echo "Grafana:       kubectl --context $CTX -n monitoring port-forward svc/kps-grafana 3000:80   (admin/admin)"
-echo "Alertmanager:  kubectl --context $CTX -n monitoring port-forward svc/alertmanager-operated 9093"
+echo "Storefront:    http://storefront.localhost/products"
+echo "Grafana:       http://grafana.localhost   (admin/admin)"
+echo "Prometheus:    http://prometheus.localhost"
+echo "Alertmanager:  http://alertmanager.localhost"
 echo "Alert log:     kubectl --context $CTX -n monitoring logs -f deploy/alert-logger"

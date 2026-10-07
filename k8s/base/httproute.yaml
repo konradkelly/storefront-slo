@@ -1,0 +1,20 @@
+# Public routes to storefront-api through the cluster Gateway (k8s/gateway/gateway.yaml). Only the API paths are
+# exposed: /actuator (health, Prometheus metrics, app internals) stays reachable inside the cluster only. Each
+# overlay sets the hostname (kind: storefront.localhost).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: storefront-api
+  namespace: storefront
+spec:
+  parentRefs:
+    - name: storefront
+      namespace: gateway
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /products }
+        - path: { type: PathPrefix, value: /cart }
+        - path: { type: PathPrefix, value: /orders }
+      backendRefs:
+        - name: storefront-api
+          port: 8080

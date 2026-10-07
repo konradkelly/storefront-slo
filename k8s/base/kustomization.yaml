@@ -12,6 +12,7 @@ resources:
   - pdb.yaml
   - autoscaling.yaml
   - networkpolicy.yaml
+  - httproute.yaml
   - servicemonitor.yaml
   # Generated from prometheus/rules/ by scripts/gen-k8s-rules.sh. Edit the source, not these.
   - slo-rules.yaml

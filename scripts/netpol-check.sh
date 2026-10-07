@@ -50,6 +50,16 @@ bad=[x for x in t if x['health']!='up']
 for x in t: print(f\"{'ok' if x['health']=='up' else 'UNEXPECTED':10} {x['scrapePool']:45} {x['labels'].get('pod','')[:32]:32} {x['health']} {x['lastError'][:60]}\")
 sys.exit(1 if bad or not t else 0)" || fails=$((fails+1))
 
+echo "== through the Gateway (from this machine, host port 80)"
+gw() {
+  local code mark=ok
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$1")
+  [ "$code" != "$2" ] && { mark=UNEXPECTED; fails=$((fails+1)); }
+  printf '%-10s %-50s expect %s got %s\n' "$mark" "$1" "$2" "$code"
+}
+gw http://storefront.localhost/products 200
+gw http://storefront.localhost/actuator/prometheus 404
+
 echo "== CloudNativePG"
 k -n storefront get cluster storefront-db -o jsonpath='phase={.status.phase} ready={.status.readyInstances}/{.status.instances}{"\n"}'
 echo; [ "$fails" -eq 0 ] && echo "ALL CHECKS AS EXPECTED" || echo "$fails UNEXPECTED RESULT(S)"

@@ -361,12 +361,26 @@ dashboards, app, and SLO rules. Problems found on the way:
       Done 2026-10-03. `kubectl diff -k` against the running cluster showed only the new `part-of` label, the
       generated rule files are byte-identical, and applying restarted no pods. Third-party software stays on Helm
       (kube-prometheus-stack, and later CloudNativePG, KEDA and Sealed Secrets). Your own app uses Kustomize.
-- [ ] Replace port-forwards with ingress-nginx (or Gateway API) on kind, using `extraPortMappings`.
+- [x] Replace port-forwards with ingress-nginx (or Gateway API) on kind, using `extraPortMappings`.
+      Done 2026-10-06 with **Gateway API on Envoy Gateway 1.9.2**. ingress-nginx was retired in March 2026 (no further
+      releases or security fixes), and the Kubernetes project recommends Gateway API. kind has no load balancer, so an
+      `EnvoyProxy` pins the proxy to the control-plane node (the `ingress-ready` label) with hostPort 80 → container
+      10080 (Envoy runs unprivileged, so port-80 listeners bind 10080). The Gateway only accepts routes from the
+      storefront and monitoring namespaces. The app's HTTPRoute (`k8s/base/httproute.yaml`, with the hostname set
+      per overlay) exposes only `/products`, `/cart` and `/orders`, so `/actuator` returns 404 from outside. Grafana,
+      Prometheus and Alertmanager are on `*.localhost`. A NetworkPolicy rule admits the Envoy proxies to the app.
+      Verified from the host: all routes return the right codes, and checkout works end to end through the gateway.
+      The first attempt timed out and got 504s while the laptop was thrashing (0.3-0.6 GiB free, ~29-46k
+      pages/s); after a Docker restart, everything passed. `scripts/netpol-check.sh` now includes the gateway checks.
 
 **Done when:** The README's "Known shortcuts" section can be deleted.
+Done 2026-10-06: the four original shortcuts are fixed. The section is replaced by "Lab-only settings and known
+gaps", which lists the deliberate kind-only settings and what isn't built yet (TLS, backups/WAL archive), instead of
+pretending there's nothing left.
 
 **Experiment:** Under k6 load, run `kubectl rollout restart` and delete a node's pods. Compare checkout
 error budget spent before and after the graceful shutdown and PDB changes. Ideally the after number is zero.
+Done in 2.2 (`scripts/experiments/exp4-disruption.sh`): 26 failed requests before, 0 after.
 
 ---
 

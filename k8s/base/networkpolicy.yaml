@@ -4,6 +4,7 @@
 #
 #   loadtest (k6, prober) ──8080──▶ storefront-api ──5432──▶ storefront-db ◀──5432──▶ storefront-db (replication)
 #   Prometheus (monitoring) ──8080──▶ storefront-api        ▲  ▲
+#   Envoy Gateway proxy ──────8080──▶ storefront-api         │  │
 #   Prometheus (monitoring) ──9187──────────────────────────┘  │
 #   CloudNativePG operator (cnpg-system) ──8000 (status)───────┘
 #   storefront-db ──6443/443──▶ Kubernetes API (the CNPG instance manager inside each pod)
@@ -58,6 +59,14 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: prometheus
+        # The Gateway's Envoy proxies (k8s/gateway/gateway.yaml). The HTTPRoute limits them to the public API paths.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+              app.kubernetes.io/component: proxy
       ports:
         - { protocol: TCP, port: 8080 }
   egress:
