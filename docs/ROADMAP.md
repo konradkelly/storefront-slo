@@ -15,11 +15,13 @@ The experiment is what turns the work into something you can explain in an inter
 | 3 | CI/CD and GitOps | GitHub Actions, promtool tests, image scanning, Argo CD, canary analysis |
 | 4a | Cloud: k3s on EC2 | Terraform, EC2, self-managed Kubernetes, cost control |
 | 4b | Cloud: migrate to EKS | Managed Kubernetes, pod IAM, External Secrets, RDS, zero-downtime cutover |
+| 4c | Cloud: port to GKE and AKS | GCP and Azure equivalents, workload identity, cross-cloud cutover |
 | 5 | Deeper reliability (stretch) | Tracing, logs, chaos engineering, resilience patterns |
 
 Phases 1 to 3 are the core. Phase 4 costs money, so start it only after 3 works on kind.
 Phase 4 starts with k3s because it's cheap and shows what a managed service does for you.
 The EKS sprint then replaces those pieces one at a time.
+Phase 4c ports the result to GCP and Azure, so the same system runs on all three clouds.
 
 ---
 
@@ -509,6 +511,51 @@ and Karpenter hold the availability SLO without manual steps. Then compare with 
 
 ---
 
+## Phase 4c: Port to GKE and AKS
+
+Run the same system on GCP and Azure. Phases 4a and 4b already covered the hard lessons (owning a control plane,
+a cutover with a budget). This phase is about mapping each building block to the other two clouds. Don't repeat
+the k3s step: go straight to the managed service on each cloud.
+
+| Concern | AWS (4b) | GCP | Azure |
+|---------|----------|-----|-------|
+| Managed Kubernetes | EKS | **GKE**: Autopilot vs. Standard. Write up the trade-off. | **AKS** (free-tier control plane) |
+| Pod identity | EKS Pod Identity | Workload Identity Federation for GKE | Entra Workload ID |
+| Secrets (External Secrets Operator) | Secrets Manager | Secret Manager | Key Vault |
+| Gateway API | AWS Load Balancer Controller | GKE Gateway controller | Application Gateway for Containers |
+| Postgres | RDS | Cloud SQL | Azure Database for PostgreSQL Flexible Server |
+| CNPG backups / object storage | S3 | GCS | Blob Storage |
+| Registry | ECR | Artifact Registry | ACR |
+| CI auth (GitHub OIDC) | IAM role | Workload Identity Federation | Federated credential on an app registration |
+| Terraform state | S3 | GCS bucket | Storage account container |
+
+- [ ] **Terraform per cloud.** Add `terraform/gcp` and `terraform/azure` with the same shape as the AWS
+      modules: network, cluster, database, registry, identity. Keep each cloud's state in its own backend.
+- [ ] **Overlays.** Add `overlays/gke` and `overlays/aks` as patches on the same base. Comparing them with
+      `overlays/eks` documents what is actually cloud-specific. Most of it should be identity, storage class,
+      and Gateway class.
+- [ ] **Gateway API.** Decide per cloud whether to keep Envoy Gateway (portable, same as kind) or use the native
+      Gateway controller. Record what each one gives up.
+- [ ] **Identity.** One identity per workload on each cloud, with no keys or connection strings in Secrets
+      that ESO didn't fetch. GitHub Actions deploys to all three through OIDC.
+- [ ] **Delivery.** One Argo CD instance managing all clusters, or one per cluster. Pick one and write down why.
+- [ ] **Observability.** Same kube-prometheus-stack, SLO rules, and dashboards on every cluster. Add a `cloud`
+      external label so the dashboards can compare clusters side by side.
+- [ ] **Cost guardrails.** A budget alert in each cloud (GCP Billing budget, Azure Cost Management budget), and
+      `make up CLOUD=gcp|azure` / `make down CLOUD=...` with the same nightly destroy as 4a. Use the
+      new-account credits, and open each account just before its sprint, because the credits expire.
+
+**Done when:** `make up CLOUD=gcp` and `make up CLOUD=azure` each go from an empty account to a working storefront
+with SLO dashboards and burn-rate alerts, `make down` returns each account to $0 per day, and a comparison
+table records, per cloud: cost per hour, time for `make up`, lines of overlay diff, and the setup steps that
+took the longest.
+
+**Experiment:** Cross-cloud cutover. Move traffic from EKS to GKE (or AKS) with the same weighted-DNS steps as 4b,
+restoring the database from the cross-cloud backup. Measure the budget spent and compare with the 4b cutover.
+Then repeat the 4b zone-failure test on the new cluster and compare recovery times.
+
+---
+
 ## Phase 5: Deeper reliability (stretch)
 
 Pick items based on interest.
@@ -538,3 +585,6 @@ Pick items based on interest.
 | GitOps | Argo CD vs. Flux | Argo CD (pairs with Argo Rollouts) |
 | Cloud cluster | EKS vs. k3s on EC2 | **Decided:** k3s first (4a), migrate to EKS later (4b) |
 | Cloud database on EKS | RDS vs. CloudNativePG on EBS | RDS, as a contrast with k3s |
+| Multi-cloud | Repeat 4a/4b on each cloud vs. go deep on AWS, then port | **Decided:** go deep on AWS (4a, 4b), then port to GKE and AKS (4c) |
+| GKE mode | Autopilot vs. Standard | Open: Autopilot is less to run, Standard is closer to EKS/AKS |
+| Argo CD topology | One hub managing all clusters vs. one per cluster | Open |
