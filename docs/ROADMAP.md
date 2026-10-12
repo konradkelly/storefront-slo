@@ -400,8 +400,9 @@ Done in 2.2 (`scripts/experiments/exp4-disruption.sh`): 26 failed requests befor
       (fail on HIGH/CRITICAL), generate an SBOM, and sign it with **cosign** (keyless).
       Implemented locally 2026-10-07 in `.github/workflows/release.yml`, gated on successful main CI.
       Publishes SHA tags, signs/attests the registry digest, and promotes it through a Git commit.
-      Local Trivy scan of the current Spring Boot 3.3.4 image found 42 HIGH/CRITICAL Java dependency findings;
-      publication remains blocked until dependencies pass the gate. No vulnerabilities are waived.
+      Local Trivy scan of the Spring Boot 3.3.4 image found 42 HIGH/CRITICAL Java dependency findings, which
+      blocked publication. Cleared 2026-10-12 by the Spring Boot 4.1.1 upgrade (see delivery.md): 0 findings
+      locally, 15/15 integration tests passing. No vulnerabilities are waived.
       Workflow execution/GHCR publication/signing still need a hosted run. Setup: [delivery.md](delivery.md).
 - [x] **Smoke test in CI:** create a kind cluster (`helm/kind-action`), deploy, and run a 2-minute k6 test whose
       `thresholds` mirror the SLOs (`http_req_failed<0.005`, `p(99)<500` on checkout). The pipeline fails

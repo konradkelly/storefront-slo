@@ -20,8 +20,8 @@ spring:
       initial_stock: ${storefront.restock-level}
 
 server:
-  # On SIGTERM: stop accepting new requests, finish the ones in flight, then exit. Spring Boot 3.3 defaults to
-  # "immediate", which drops in-flight requests during every rolling update.
+  # On SIGTERM: stop accepting new requests, finish the ones in flight, then exit. Spring Boot 3.4+ defaults to this
+  # too; it stays explicit because "immediate" drops in-flight requests during every rolling update.
   shutdown: graceful
 
 management:

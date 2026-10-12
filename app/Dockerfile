@@ -5,7 +5,10 @@ RUN mvn -q dependency:go-offline
 COPY src ./src
 RUN mvn -q package -DskipTests
 
-FROM eclipse-temurin:21.0.12.1_1-jre
+# Ubuntu 24.04 (noble), pinned explicitly. The default tag moved to Ubuntu 26.04, whose base image adds Canonical's
+# pebble service manager: a Go binary this app never runs, built with a Go version that has open HIGH CVEs
+# (2026-10-12), which fails the release gate. Same JRE either way.
+FROM eclipse-temurin:21.0.12.1_1-jre-noble
 # Numeric UID so Kubernetes can verify runAsNonRoot without resolving a username.
 RUN useradd --system --uid 10001 --no-create-home storefront
 WORKDIR /app

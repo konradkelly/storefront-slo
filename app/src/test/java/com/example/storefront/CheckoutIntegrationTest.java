@@ -1,6 +1,6 @@
 package com.example.storefront;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,7 +25,7 @@ class CheckoutIntegrationTest extends IntegrationTest {
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(res.getBody().get("totalCents").asLong()).isEqualTo(price * 2);
-        assertThat(res.getBody().get("status").asText()).isEqualTo("PAID");
+        assertThat(res.getBody().get("status").asString()).isEqualTo("PAID");
         assertThat(stockOf(productId)).isEqualTo(stockBefore - 2);
         assertThat(cart(cartId)).isEmpty();
         assertThat(checkouts("success")).isEqualTo(successBefore + 1);

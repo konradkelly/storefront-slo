@@ -14,10 +14,17 @@ the SBOM are also retained in the workflow's `image-security-*` artifact.
 
 ## First release
 
-Local validation on 2026-10-07 found 42 HIGH/CRITICAL findings in the current Spring Boot 3.3.4
-image's Java dependencies (34 HIGH, 8 CRITICAL). The gate blocks publishing; the dependency
-migration needs to clear it before the first successful release. SBOM/report generation and
-the gate's nonzero exit were verified locally. Registry signing/promotion await a hosted run.
+Local validation on 2026-10-07 found 42 HIGH/CRITICAL findings in the Spring Boot 3.3.4 image's
+Java dependencies (34 HIGH, 8 CRITICAL), and the gate blocked publishing. Fixed 2026-10-12:
+
+- Spring Boot 3.3.4 → **4.1.1** (Spring Framework 7.0.9; CVE-2026-47884 has no 6.x fix).
+- Tomcat 11.0.25 and Jackson 3.1.7 pinned ahead of Boot's managed versions (`app/pom.xml`).
+  Remove the pins once a Boot release manages these or newer.
+- Runtime base `eclipse-temurin:21.0.12.1_1-jre-noble` (Ubuntu 24.04). The default tag moved to
+  Ubuntu 26.04, whose image adds a `pebble` Go binary with HIGH Go stdlib CVEs.
+
+`scripts/scan-image.sh` then passed locally with 0 HIGH/CRITICAL findings, and no vulnerabilities
+are waived. Registry signing and promotion still await a hosted run.
 
 1. Push the workflows and supporting files to main. CI must pass before Release can publish.
    Run CI manually on main to retry without changing source.

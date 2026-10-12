@@ -1,15 +1,16 @@
 package com.example.storefront;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.util.Map;
 import java.util.UUID;
@@ -20,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Boots the full app against a real Postgres. Subclasses pick the payment failure rate, which gives each
  * its own Spring context; the container is a JVM-wide singleton so both contexts share it.
  *
- * AutoConfigureObservability is required because Spring Boot tests otherwise replace the Prometheus
+ * AutoConfigureMetrics is required because Spring Boot tests otherwise replace the Prometheus
  * registry with a simple one, and these tests check what Prometheus actually scrapes.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -29,13 +30,14 @@ import static org.assertj.core.api.Assertions.assertThat;
         // Keep the restocker out of the way so stock assertions are stable.
         "storefront.restock-interval-ms=3600000",
         "storefront.reservation-sweep-interval-ms=3600000"})
-@AutoConfigureObservability
+@AutoConfigureMetrics
+@AutoConfigureTestRestTemplate
 public abstract class IntegrationTest {
 
     protected static final int RESTOCK_LEVEL = 50;
 
     @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16.14");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16.14");
 
     static {
         POSTGRES.start();

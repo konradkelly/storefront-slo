@@ -7,7 +7,7 @@ import com.example.storefront.order.OrderRepository;
 import com.example.storefront.order.OrderService;
 import com.example.storefront.order.OrderStatus;
 import com.example.storefront.product.ProductRepository;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;

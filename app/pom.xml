@@ -6,7 +6,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.3.4</version>
+    <version>4.1.1</version>
     <relativePath/>
   </parent>
   <groupId>com.example</groupId>
@@ -14,12 +14,16 @@
   <version>0.1.0</version>
   <properties>
     <java.version>21</java.version>
-    <testcontainers.version>1.21.3</testcontainers.version>
+    <!-- Ahead of Spring Boot 4.1.1's managed versions, to clear the release gate (scripts/scan-image.sh):
+         Tomcat 11.0.24 has CVE-2026-65182/65905/68525 (CRITICAL), Jackson 3.1.5 has CVE-2026-68497/89407/89425/
+         91776/91777 (HIGH). Patch releases only. Delete both lines once a Boot release manages these or newer. -->
+    <tomcat.version>11.0.25</tomcat.version>
+    <jackson-bom.version>3.1.7</jackson-bom.version>
   </properties>
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-web</artifactId>
+      <artifactId>spring-boot-starter-webmvc</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -38,10 +42,12 @@
       <artifactId>postgresql</artifactId>
       <scope>runtime</scope>
     </dependency>
-    <!-- Schema migrations (src/main/resources/db/migration). Since Flyway 10, Postgres support is its own module. -->
+    <!-- Schema migrations (src/main/resources/db/migration). Since Spring Boot 4, Flyway is only auto-configured
+         through its starter: flyway-core alone on the classpath no longer runs migrations. Since Flyway 10, Postgres
+         support is its own module. -->
     <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-core</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
@@ -52,6 +58,24 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- TestRestTemplate (a separate module since Spring Boot 4), and the RestTemplateBuilder it's built from.
+         The app itself makes no outbound HTTP calls, so restclient is a test dependency only. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-resttestclient</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-restclient</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- @AutoConfigureMetrics: keep the real Prometheus registry in tests -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-micrometer-metrics-test</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-testcontainers</artifactId>
@@ -59,12 +83,12 @@
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
-      <artifactId>junit-jupiter</artifactId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
-      <artifactId>postgresql</artifactId>
+      <artifactId>testcontainers-postgresql</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
