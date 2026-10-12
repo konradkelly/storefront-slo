@@ -1,8 +1,9 @@
-# kube-prometheus-stack values for the kind cluster (chart 91.9.0). Installed by scripts/kind-up.sh.
+# kube-prometheus-stack values (chart 91.9.0), the same on kind and k3s. Installed by scripts/lib/platform.sh.
 # The Alertmanager config and Slack template come from alertmanager/ (shared with Compose) via --set-file.
 
 # kind runs etcd, the scheduler, the controller manager and kube-proxy with metrics bound to localhost, so
-# Prometheus can't scrape them and their "...Down" alerts would fire forever. Turn off the scrapes and rules.
+# Prometheus can't scrape them and their "...Down" alerts would fire forever. k3s runs them all inside one k3s
+# process (and a single server uses SQLite, not etcd), with the same result. Turn off the scrapes and rules.
 kubeEtcd:
   enabled: false
 kubeScheduler:

@@ -449,26 +449,58 @@ Run the system on a real cloud cluster that you operate yourself. k3s on EC2 cos
 and it makes you handle the parts EKS later takes over: the control plane, node identity, and storage.
 Keep a written list of each piece you had to run yourself, because Phase 4b is structured around that list.
 
+Built 2026-10-12, not yet applied: `terraform plan` passes against the real account (38 resources), and the
+manifests pass the CI schema and lint checks. The boxes get checked after the first real `make up`. How to run it,
+the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
+
 - [ ] **Terraform foundation.** State in S3 with locking. Modules for a VPC, security groups, and EC2 instances:
       1 k3s server and 2 agents (t3.medium), installed through `user_data`. Use **SSM Session Manager**
       instead of SSH so port 22 stays closed. Expose the Kubernetes API only to your IP, or reach it
       through an SSM port-forward.
+      Built: `terraform/aws/bootstrap` (state bucket with S3-native locking, no DynamoDB) and `terraform/aws/k3s`
+      (one public subnet per zone, no NAT gateway, Amazon Linux 2023, k3s v1.34.12). The API and port 80 are open to
+      your IP only (`make up` detects it), and SSH is closed. The server has an Elastic IP so the experiment's
+      stop/start doesn't invalidate its certificate.
 - [ ] **Images.** Pull from **GHCR**, which Phase 3 already publishes to. Using GHCR avoids setting up the ECR
       credential provider on self-managed nodes.
+      Unblocked 2026-10-12: Spring Boot 4.1.1 clears the release gate locally, so the next main CI run should
+      publish the first image. `scripts/promote-image.sh` now writes the digest to both `kind-gitops` and `k3s`.
 - [ ] **Built-in k3s components.** k3s ships with Traefik, ServiceLB, and local-path storage. Decide whether
       to keep Traefik or disable it and install ingress-nginx for parity with kind. Also note that k3s
       **does** enforce NetworkPolicy through its embedded kube-router, unlike kind, so re-test the Phase 2 policies.
+      Decided: Traefik and k3s's metrics-server are disabled. Envoy Gateway and the metrics-server chart come from
+      the same `scripts/lib/platform.sh` as kind (ingress-nginx was retired in March 2026). ServiceLB and
+      local-path stay. Nodes get zone labels from user_data: the API's zone spread uses `DoNotSchedule`, so without
+      them no API pod would schedule. NetworkPolicy re-test still to do.
 - [ ] **Database.** Run CloudNativePG on local-path storage, with backups to S3 through the operator's
       barman integration. Data on a node's disk is the weak point here, and fixing it is part of Phase 4b.
+      Built with the **Barman Cloud plugin** (+ cert-manager), not the in-tree `barmanObjectStore`, which is
+      deprecated and removed in CNPG 1.31: WAL archiving plus a daily base backup (`k8s/overlays/k3s/backups.yaml`).
+      The existing egress rule for the database already allows HTTPS to S3. The WAL archive is also the lasting
+      fix for the 2.1 pg_rewind failure.
 - [ ] **AWS access from pods.** Self-managed nodes have no per-pod identity. Every pod can reach the node role
       through IMDS. Set the IMDS hop limit to 1 so pods can't use it, and keep **Sealed Secrets** from
       Phase 2 for DB credentials. Write down the limitation, because it's the main reason to move to EKS.
+      Built: IMDSv2 required, hop limit 1. Sealed Secrets was never needed: CNPG generates the DB password. The
+      limitation shows up in the backups instead: a static IAM access key, scoped to one bucket, in a Secret
+      created by `make up` (see `terraform/aws/k3s/backups.tf`). The node roles can read only the join token, and
+      only the server can publish the kubeconfig.
 - [ ] **Delivery.** Add `overlays/k3s` and point Argo CD at it. GitHub Actions deploys to AWS through
       **OIDC**, so no long-lived access keys are stored.
+      Built: `k8s/overlays/k3s` and `k8s/argocd/storefront-k3s.yaml`, installed by `scripts/argocd-up.sh k3s`. Argo
+      CD pulls from git, so Actions never needs cluster credentials. Actions uses AWS (through OIDC, role scoped to
+      main) only for the nightly destroy.
 - [ ] **Observability.** Run the same kube-prometheus-stack, SLO rules, and dashboards as on kind.
       Add node-exporter alerts for disk and memory, since you now own the nodes.
+      Built: same chart and values through `scripts/lib/platform.sh`, which kind-up.sh now uses too, and
+      `k8s/monitoring/node-alerts.yaml` (severity ticket, runbook `docs/runbooks/NodeResources.md`).
+      Prometheus is an emptyDir, so a curated subset (SLO results, latency, nodes, archiving) is remote-written
+      to Grafana Cloud's free tier to outlive `make down` (`k8s/monitoring/kps-remote-write.yaml`).
 - [ ] **Cost guardrails.** An AWS Budget alert, `make up` / `make down` targets, and a nightly scheduled
       `terraform destroy`.
+      Built: budget in bootstrap (whole account, 50/80/100% plus forecast), `Makefile`, and
+      `.github/workflows/k3s-nightly-destroy.yml` (07:00 UTC, needs the `AWS_K3S_ROLE_ARN` repository variable).
+      `make keep HOURS=72` skips it for a soak run (capped at 7 days). Run plan and costs: docs/k3s.md.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.

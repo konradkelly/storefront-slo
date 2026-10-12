@@ -1,0 +1,32 @@
+# Copies a curated subset of metrics to Grafana Cloud, so the data outlives `make down` (in-cluster Prometheus
+# uses an emptyDir and starts empty on every `make up`). Added by scripts/k3s-up.sh only when
+# k8s/monitoring/secrets/grafana-cloud.env exists. It replaces GRAFANA_CLOUD_PROM_URL, and the credentials come
+# from the grafana-cloud Secret it creates.
+#
+# The free tier allows 10k active series, and the whole kube-prometheus-stack produces several times that. So
+# send only what the dashboards (grafana/dashboards/), the SLOs and the node alerts read. The SLO recording rules
+# (slo:*) are computed in the cluster and shipped as results. Estimate with 3-6 API pods: 3-7k series, almost
+# all of it latency histogram buckets. Before a long run, check the real number on Grafana Cloud's usage page
+# (Billing/Usage → Metrics), or in the cluster's Prometheus: prometheus_remote_storage_highest_timestamp_in_seconds
+# shows that sending works, and count({__name__=~"<keep regex>"}) approximates the series count.
+# Over the limit, Grafana Cloud drops samples. The free tier never bills.
+prometheus:
+  prometheusSpec:
+    remoteWrite:
+      - url: GRAFANA_CLOUD_PROM_URL
+        basicAuth:
+          username:
+            name: grafana-cloud
+            key: username
+          password:
+            name: grafana-cloud
+            key: password
+        writeRelabelConfigs:
+          - sourceLabels: [__name__]
+            action: keep
+            regex: >-
+              slo:.*|ALERTS|up|storefront_.*|http_server_requests_seconds_(bucket|count|sum)|hikaricp_connections_(active|pending)|kube_pod_container_status_restarts_total|node_memory_Mem(Available|Total)_bytes|node_filesystem_(avail|size)_bytes|node_cpu_seconds_total|cnpg_collector_up|cnpg_pg_replication_lag|cnpg_pg_stat_archiver_.*
+          # Probes and scrapes hit /actuator every few seconds. They're not customer traffic and no SLO counts them.
+          - sourceLabels: [__name__, uri]
+            action: drop
+            regex: http_server_requests_seconds_.*;/actuator.*

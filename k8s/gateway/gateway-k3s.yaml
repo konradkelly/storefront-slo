@@ -1,0 +1,58 @@
+# The cluster's front door on k3s: the same Gateway as kind (gateway.yaml), with a different way in.
+#
+# k3s's ServiceLB (klipper-lb) implements Services of type LoadBalancer without a cloud: it runs a small pod on
+# every node that claims the Service's port on the host and forwards to the Service. So port 80 on any node's
+# address reaches Envoy, and the security group (terraform/aws/k3s/network.tf) decides who may connect.
+# externalTrafficPolicy Cluster: any node forwards to any Envoy pod. Envoy Gateway's default, Local, would only
+# answer on nodes that happen to run an Envoy pod, and the Elastic IP is on the server.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: k3s-servicelb
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        externalTrafficPolicy: Cluster
+      envoyDeployment:
+        replicas: 2
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: k3s-servicelb
+    namespace: envoy-gateway-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: storefront
+  namespace: gateway
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [storefront, monitoring]

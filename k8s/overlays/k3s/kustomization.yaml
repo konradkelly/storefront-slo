@@ -1,0 +1,40 @@
+# k3s on EC2 (Phase 4a, terraform/aws/k3s). Argo CD syncs this overlay (k8s/argocd/storefront-k3s.yaml).
+# Differences from kind, each one a thing a managed cluster would handle differently (see docs/k3s.md):
+#   - the image comes from GHCR; the release workflow writes the signed digest here
+#   - Postgres archives WAL and takes daily base backups to S3 (backups.yaml), because local-path volumes die with
+#     their node
+#   - no synchronous_commit override: that was a workaround for Docker Desktop's disk (overlays/kind)
+#   - the app route has no hostname, so http://<server IP>/products matches. The monitoring UIs have hostnames
+#     (scripts/k3s-up.sh), and a route with a hostname wins over this one for its host.
+#
+# Postgres reaching S3 needs no NetworkPolicy change: base/networkpolicy.yaml already lets the database pods
+# reach any address on 443 (for the Kubernetes API), and S3 is HTTPS.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - backups.yaml
+
+patches:
+  # Ship WAL through the Barman Cloud plugin (installed by scripts/k3s-up.sh) to the ObjectStore in backups.yaml.
+  - target:
+      kind: Cluster
+      name: storefront-db
+    patch: |-
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata:
+        name: storefront-db
+      spec:
+        plugins:
+          - name: barman-cloud.cloudnative-pg.io
+            isWALArchiver: true
+            parameters:
+              barmanObjectName: storefront-backups
+
+# Keep images last: scripts/promote-image.sh rewrites everything after this line.
+images:
+  - name: storefront-api
+    newName: ghcr.io/konradkelly/storefront-slo
+    newTag: awaiting-first-release

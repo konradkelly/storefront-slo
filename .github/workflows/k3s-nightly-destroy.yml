@@ -1,0 +1,81 @@
+name: k3s nightly destroy
+
+# Cost guardrail for Phase 4a: whatever `make up` left running is destroyed every night, the same way
+# `make down` does it. A no-op when nothing is up. Authenticates through GitHub OIDC to the role created by
+# terraform/aws/bootstrap; no AWS keys are stored in GitHub.
+#
+# Setup, once: gh variable set AWS_K3S_ROLE_ARN --body "$(terraform -chdir=terraform/aws/bootstrap output -raw github_role_arn)"
+# Skip it for a deliberate long run (a soak): make keep HOURS=72   (sets K3S_KEEP_UNTIL; make unkeep clears it)
+
+on:
+  schedule:
+    - cron: '0 7 * * *' # 07:00 UTC (midnight to 3 am in US time zones)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3s-terraform
+  cancel-in-progress: false
+
+jobs:
+  # Fails safe: an unparsable K3S_KEEP_UNTIL, a past time, or one more than 7 days ahead (forgotten, or a typo)
+  # means destroy anyway.
+  check:
+    if: vars.AWS_K3S_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      destroy: ${{ steps.keep.outputs.destroy }}
+    steps:
+      - name: Check K3S_KEEP_UNTIL
+        id: keep
+        env:
+          KEEP_UNTIL: ${{ vars.K3S_KEEP_UNTIL }}
+        run: |
+          destroy=true
+          if [ -n "$KEEP_UNTIL" ]; then
+            now=$(date -u +%s)
+            if ! until=$(date -u -d "$KEEP_UNTIL" +%s 2>/dev/null); then
+              echo "::warning::K3S_KEEP_UNTIL='$KEEP_UNTIL' is not a date. Destroying."
+            elif [ "$until" -gt $((now + 7 * 86400)) ]; then
+              echo "::warning::K3S_KEEP_UNTIL is more than 7 days away. Ignoring it and destroying."
+            elif [ "$until" -gt "$now" ]; then
+              echo "::notice::Kept until $KEEP_UNTIL (K3S_KEEP_UNTIL). Not destroying tonight."
+              destroy=false
+            else
+              echo "K3S_KEEP_UNTIL=$KEEP_UNTIL has passed. Destroying."
+            fi
+          fi
+          echo "destroy=$destroy" >> "$GITHUB_OUTPUT"
+
+  destroy:
+    needs: check
+    if: needs.check.outputs.destroy == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # request the OIDC token that AWS exchanges for role credentials
+    defaults:
+      run:
+        working-directory: terraform/aws/k3s
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_K3S_ROLE_ARN }}
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.5
+          terraform_wrapper: false
+      - name: Terraform init
+        run: |
+          account=$(aws sts get-caller-identity --query Account --output text)
+          terraform init -input=false -backend-config="bucket=storefront-pulse-tfstate-$account"
+      - name: Show what is running
+        run: terraform state list || true
+      - name: Destroy
+        run: terraform destroy -input=false -auto-approve

@@ -1,0 +1,44 @@
+#!/bin/bash
+# k3s server bootstrap (Amazon Linux 2023), rendered by Terraform. Runs once, at first boot.
+# Log: /var/log/storefront-k3s-init.log (read it with: aws ssm start-session --target <instance-id>)
+set -euo pipefail
+exec > >(tee -a /var/log/storefront-k3s-init.log) 2>&1
+
+imds_token=$(curl -sf -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 300" http://169.254.169.254/latest/api/token)
+zone=$(curl -sf -H "X-aws-ec2-metadata-token: $imds_token" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+
+# The instance profile's credentials can take a few seconds to appear after boot.
+for _ in $(seq 30); do
+  token=$(aws ssm get-parameter --region ${region} --name ${token_param} --with-decryption \
+    --query Parameter.Value --output text) && break
+  sleep 5
+done
+
+# traefik: replaced by Envoy Gateway, same as kind. metrics-server: installed from the same chart as kind.
+# --prefer-bundled-bin: use k3s's own iptables/ipset (AL2023 doesn't ship them; kube-router needs them for
+#   NetworkPolicy). --secrets-encryption: Secrets are encrypted at rest in the datastore.
+# Zone/region labels: base/storefront-api.yaml spreads pods across topology.kubernetes.io/zone with DoNotSchedule,
+#   and k3s without a cloud provider sets no zone label, so without these no API pod would schedule.
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
+  K3S_TOKEN="$token" sh -s - server \
+    --disable traefik \
+    --disable metrics-server \
+    --prefer-bundled-bin \
+    --secrets-encryption \
+    --write-kubeconfig-mode 0600 \
+    --tls-san ${public_ip} \
+    --node-label "topology.kubernetes.io/zone=$zone" \
+    --node-label "topology.kubernetes.io/region=${region}"
+
+until /usr/local/bin/k3s kubectl get --raw /readyz >/dev/null 2>&1; do sleep 5; done
+
+# Publish an admin kubeconfig that points at the Elastic IP, with the context named k3s-storefront.
+kubeconfig=$(mktemp)
+sed -E -e 's#https://127\.0\.0\.1:6443#https://${public_ip}:6443#' \
+  -e 's/^(\s*(name|cluster|user|current-context): )default$/\1k3s-storefront/' \
+  /etc/rancher/k3s/k3s.yaml > "$kubeconfig"
+aws ssm put-parameter --region ${region} --name ${kubeconfig_param} --type SecureString \
+  --tier Intelligent-Tiering --overwrite --value "file://$kubeconfig" >/dev/null
+rm -f "$kubeconfig"
+echo "k3s server ready in $zone"

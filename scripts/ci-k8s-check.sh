@@ -12,17 +12,19 @@ kubectl kustomize k8s/base > "$render_dir/base.yaml"
 kubectl kustomize k8s/overlays/kind > "$render_dir/kind.yaml"
 kubectl kustomize k8s/overlays/kind-gitops > "$render_dir/kind-gitops.yaml"
 kubectl kustomize k8s/overlays/ci > "$render_dir/ci.yaml"
+kubectl kustomize k8s/overlays/k3s > "$render_dir/k3s.yaml"
 
 # Missing schemas are errors, including for CRs. No -ignore-missing-schemas.
 kubeconform -strict -summary -kubernetes-version 1.34.0 \
   -schema-location default \
   -schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/$crd_catalog/{{ .Group }}/{{ .ResourceKind }}_{{ .ResourceAPIVersion }}.json" \
   "$render_dir/base.yaml" "$render_dir/kind.yaml" "$render_dir/kind-gitops.yaml" "$render_dir/ci.yaml" \
-  k8s/argocd/storefront.yaml \
-  k8s/gateway/gateway.yaml k8s/gateway/monitoring-routes.yaml \
-  k8s/monitoring/alert-logger.yaml k8s/loadtest/k6-job.yaml
+  "$render_dir/k3s.yaml" \
+  k8s/argocd/storefront.yaml k8s/argocd/storefront-k3s.yaml \
+  k8s/gateway/gateway.yaml k8s/gateway/gateway-k3s.yaml k8s/gateway/monitoring-routes.yaml \
+  k8s/monitoring/alert-logger.yaml k8s/monitoring/node-alerts.yaml k8s/loadtest/k6-job.yaml
 
 # Lint the deployable overlay: base intentionally leaves its image tag to overlays.
 # Supporting Gateway/logger/load-test manifests receive schema validation above.
 kube-linter lint --config .kube-linter.yaml \
-  "$render_dir/kind.yaml" "$render_dir/kind-gitops.yaml"
+  "$render_dir/kind.yaml" "$render_dir/kind-gitops.yaml" "$render_dir/k3s.yaml"

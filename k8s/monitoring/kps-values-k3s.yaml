@@ -1,0 +1,7 @@
+# Added to kps-values.yaml on k3s (scripts/k3s-up.sh).
+prometheus:
+  prometheusSpec:
+    # Attached to everything this Prometheus sends out: remote-written series (kps-remote-write.yaml) and alerts.
+    # In Grafana Cloud it tells the environments apart, and 4c's GKE/AKS clusters will get their own values.
+    externalLabels:
+      cluster: k3s-aws

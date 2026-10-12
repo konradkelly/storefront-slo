@@ -10,23 +10,26 @@ if [[ $(git rev-parse origin/main) != "$SOURCE_SHA" ]]; then
   echo 'Main advanced; image is published, promotion left to the newer release.'
   exit 0
 fi
-python3 - <<'PY'
-import os
+# Every GitOps environment runs the same signed digest. Each overlay keeps its images section last.
+overlays=(k8s/overlays/kind-gitops/kustomization.yaml k8s/overlays/k3s/kustomization.yaml)
+python3 - "${overlays[@]}" <<'PY'
+import os, sys
 from pathlib import Path
-path = Path('k8s/overlays/kind-gitops/kustomization.yaml')
-text = path.read_text()
-prefix, marker, _ = text.partition('images:\n')
-if not marker:
-    raise SystemExit('Missing image section')
-path.write_text(prefix + marker + '  - name: storefront-api\n'
-                + f'    newName: {os.environ["IMAGE_NAME"]}\n'
-                + f'    digest: {os.environ["IMAGE_DIGEST"]}\n')
+for name in sys.argv[1:]:
+    path = Path(name)
+    text = path.read_text()
+    prefix, marker, _ = text.partition('images:\n')
+    if not marker:
+        raise SystemExit(f'Missing image section in {name}')
+    path.write_text(prefix + marker + '  - name: storefront-api\n'
+                    + f'    newName: {os.environ["IMAGE_NAME"]}\n'
+                    + f'    digest: {os.environ["IMAGE_DIGEST"]}\n')
 PY
 git config user.name 'github-actions[bot]'
 git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-git add k8s/overlays/kind-gitops/kustomization.yaml
+git add "${overlays[@]}"
 if git diff --cached --quiet; then exit 0; fi
-git commit -m "Deploy storefront ${SOURCE_SHA:0:12} to kind"
+git commit -m "Deploy storefront ${SOURCE_SHA:0:12} to kind and k3s"
 # GITHUB_TOKEN pushes do not trigger CI again. A protected main can reject this;
 # in that case promote through a reviewed PR instead of bypassing protection.
 git push origin HEAD:main

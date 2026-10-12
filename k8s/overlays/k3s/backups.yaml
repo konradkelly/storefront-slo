@@ -1,0 +1,55 @@
+# Postgres backups to S3 through the CloudNativePG Barman Cloud plugin (plugin chart 0.8.1, app v0.15.1). The
+# operator's built-in barmanObjectStore is deprecated and is removed in CNPG 1.31.
+#
+# The plugin adds a sidecar to each instance pod. The sidecar archives every WAL segment as soon as Postgres closes
+# it, and the ScheduledBackup below takes a full base backup daily. Restoring = base backup + WAL replay, to any
+# point in time inside the retention window.
+#
+# Credentials: Secret storefront-backup-s3, created by scripts/k3s-up.sh from Terraform outputs, never in git. It
+# holds a static IAM access key, the Phase 4a limitation described in terraform/aws/k3s/backups.tf.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: storefront-backups
+  namespace: storefront
+spec:
+  configuration:
+    # Bucket created by terraform/aws/k3s/backups.tf (the name includes the account ID).
+    destinationPath: s3://storefront-k3s-backups-675901257165/storefront-db
+    s3Credentials:
+      accessKeyId:
+        name: storefront-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: storefront-backup-s3
+        key: ACCESS_SECRET_KEY
+      region:
+        name: storefront-backup-s3
+        key: AWS_REGION
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  retentionPolicy: "7d"
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: storefront-db-daily
+  namespace: storefront
+spec:
+  schedule: "0 0 3 * * *" # seconds first: daily at 03:00 UTC
+  immediate: true # also take one as soon as the cluster exists, so there is always a base backup to restore from
+  backupOwnerReference: self
+  cluster:
+    name: storefront-db
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

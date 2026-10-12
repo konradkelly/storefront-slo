@@ -1,0 +1,37 @@
+# Node alerts for clusters where we own the machines (k3s on EC2). Applied by scripts/k3s-up.sh; not on kind, whose
+# "nodes" are containers sharing the laptop's disk and memory.
+#
+# kube-prometheus-stack already has node-exporter alerts, but they're mostly severity=warning, which
+# alertmanager.yml routes to the logger only. These two go to the ticket channel: a full disk takes out local-path
+# Postgres volumes and the container runtime, and memory exhaustion means the kernel OOM killer picks the victims.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: node-resources
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  groups:
+    - name: node-resources
+      rules:
+        - alert: NodeRootDiskFillingUp
+          expr: |
+            1 - node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
+              / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"} > 0.85
+          for: 15m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Root disk on {{ $labels.instance }} is over 85% full"
+            description: "{{ $value | humanizePercentage }} used. Images, container logs and local-path volumes (Postgres) share this disk."
+            runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/NodeResources.md"
+        - alert: NodeMemoryLow
+          expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+          for: 15m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Node {{ $labels.instance }} has under 10% memory available"
+            description: "{{ $value | humanizePercentage }} available. Next comes the kernel OOM killer, which picks its own victims."
+            runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/NodeResources.md"

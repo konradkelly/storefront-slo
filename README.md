@@ -8,10 +8,11 @@ rate lets you break things on purpose and watch the dashboards and alerts react.
 
 ```
 app/          Spring Boot API (products, cart, checkout, fake payments)
-k8s/          Kustomize base/ (app, Postgres, ServiceMonitor, SLO rules) + overlays/kind; kind config, monitoring values, k6 Job
+k8s/          Kustomize base/ (app, Postgres, ServiceMonitor, SLO rules) + overlays/kind and k3s; monitoring values, k6 Job
+terraform/    AWS: bootstrap (state, budget, CI role) and k3s on EC2 (Phase 4a)
 prometheus/   Compose scrape config, SLO recording rules, burn-rate alerts, promtool tests
 alertmanager/ routing, inhibition, Slack template, local webhook logger (secrets are gitignored)
-scripts/      gen-k8s-rules.sh: wraps the SLO rules and alerts into PrometheusRules for kind
+scripts/      kind-up.sh / k3s-up.sh (shared platform in lib/), gen-k8s-rules.sh, experiments
 loadtest/     k6 script: realistic browsing (default) or checkout-heavy stress
 docs/         SLO spec, runbooks, postmortem template, roadmap, architecture notes
 ```
@@ -214,6 +215,12 @@ Each `set env` triggers a rollout. Predict what you'll see before running it.
    Look for the gap in the graphs and the scrape target going down.
 
 Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 CHECKOUT_MODE=saga`.
+
+## Step 5: a real cloud cluster (k3s on EC2)
+
+`make up` builds the same system on three EC2 instances that you run yourself, and `make down` removes it. It
+costs about $0.15/hr while up, and a nightly workflow destroys it in case you forget. Setup, cost and what
+changes compared with kind: [docs/k3s.md](docs/k3s.md).
 
 ## Lab-only settings and known gaps
 

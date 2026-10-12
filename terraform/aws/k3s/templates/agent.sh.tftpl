@@ -1,0 +1,24 @@
+#!/bin/bash
+# k3s agent bootstrap (Amazon Linux 2023), rendered by Terraform. Runs once, at first boot. The agent keeps
+# retrying the server on its own, so it can boot before the server is ready.
+# Log: /var/log/storefront-k3s-init.log
+set -euo pipefail
+exec > >(tee -a /var/log/storefront-k3s-init.log) 2>&1
+
+imds_token=$(curl -sf -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 300" http://169.254.169.254/latest/api/token)
+zone=$(curl -sf -H "X-aws-ec2-metadata-token: $imds_token" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+
+for _ in $(seq 30); do
+  token=$(aws ssm get-parameter --region ${region} --name ${token_param} --with-decryption \
+    --query Parameter.Value --output text) && break
+  sleep 5
+done
+
+# Flags explained in server.sh.tftpl.
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
+  K3S_URL='https://${server_ip}:6443' K3S_TOKEN="$token" sh -s - agent \
+    --prefer-bundled-bin \
+    --node-label "topology.kubernetes.io/zone=$zone" \
+    --node-label "topology.kubernetes.io/region=${region}"
+echo "k3s agent started in $zone"

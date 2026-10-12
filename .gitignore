@@ -13,7 +13,17 @@ Thumbs.db
 # Alertmanager secrets (Slack webhook URLs). Only the README is committed.
 alertmanager/secrets/*
 !alertmanager/secrets/README.md
+k8s/monitoring/secrets/*
+!k8s/monitoring/secrets/README.md
 
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Terraform: providers, state (bootstrap keeps local state) and per-machine variables. Lock files are committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.auto.tfvars.json
+!*.tfvars.example
