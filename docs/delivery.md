@@ -24,7 +24,17 @@ Java dependencies (34 HIGH, 8 CRITICAL), and the gate blocked publishing. Fixed 
   Ubuntu 26.04, whose image adds a `pebble` Go binary with HIGH Go stdlib CVEs.
 
 `scripts/scan-image.sh` then passed locally with 0 HIGH/CRITICAL findings, and no vulnerabilities
-are waived. Registry signing and promotion still await a hosted run.
+are waived.
+
+The first hosted release succeeded on 2026-10-12 (run 38318364911, source `a01eeb0`), after one
+more fix: cosign-installer v3 can't install cosign 3, which ships `.sigstore.json` bundles instead
+of `.sig` files, so the installer is now v4.1.2. The promotion commit `d566660` pinned
+`sha256:0769ce23…` in both GitOps overlays. The package inherited the repository's public
+visibility, so anonymous pulls work without changing settings. Anyone can verify the signature:
+
+```bash
+cosign verify ghcr.io/konradkelly/storefront-slo@sha256:0769ce23fbe0764f7b4272da9457a0571244a4ecf837f9716e9fc31f7b46be20   --certificate-oidc-issuer https://token.actions.githubusercontent.com   --certificate-identity-regexp '^https://github.com/konradkelly/storefront-slo/\.github/workflows/release\.yml@refs/heads/main$'
+```
 
 1. Push the workflows and supporting files to main. CI must pass before Release can publish.
    Run CI manually on main to retry without changing source.

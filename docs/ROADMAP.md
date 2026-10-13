@@ -398,14 +398,16 @@ Done in 2.2 (`scripts/experiments/exp4-disruption.sh`): 26 failed requests befor
       are uploaded even after failures. Local schema/lint/drift checks passed. After launching Docker Desktop,
       `mvn verify` passed in the Java 21 Maven container (15 tests, no failures/errors/skips), and promtool
       checked all 49 rules and passed both rule-test files. The first hosted workflow run is still pending.
-- [ ] On main: build the image, push it to **GHCR** tagged with the git SHA, scan it with **Trivy**
+- [x] On main: build the image, push it to **GHCR** tagged with the git SHA, scan it with **Trivy**
       (fail on HIGH/CRITICAL), generate an SBOM, and sign it with **cosign** (keyless).
       Implemented locally 2026-10-07 in `.github/workflows/release.yml`, gated on successful main CI.
       Publishes SHA tags, signs/attests the registry digest, and promotes it through a Git commit.
       Local Trivy scan of the Spring Boot 3.3.4 image found 42 HIGH/CRITICAL Java dependency findings, which
       blocked publication. Cleared 2026-10-12 by the Spring Boot 4.1.1 upgrade (see delivery.md): 0 findings
       locally, 15/15 integration tests passing. No vulnerabilities are waived.
-      Workflow execution/GHCR publication/signing still need a hosted run. Setup: [delivery.md](delivery.md).
+      First hosted release 2026-10-12 (run 38318364911), after bumping cosign-installer to v4.1.2 for
+      cosign 3's bundle format. Signature verified with `cosign verify` against the release.yml identity.
+      Setup and verification: [delivery.md](delivery.md).
 - [x] **Smoke test in CI:** create a kind cluster (`helm/kind-action`), deploy, and run a 2-minute k6 test whose
       `thresholds` mirror the SLOs (`http_req_failed<0.005`, `p(99)<500` on checkout). The pipeline fails
       when the SLO would.
@@ -463,8 +465,8 @@ the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
       stop/start doesn't invalidate its certificate.
 - [ ] **Images.** Pull from **GHCR**, which Phase 3 already publishes to. Using GHCR avoids setting up the ECR
       credential provider on self-managed nodes.
-      Unblocked 2026-10-12: Spring Boot 4.1.1 clears the release gate locally, so the next main CI run should
-      publish the first image. `scripts/promote-image.sh` now writes the digest to both `kind-gitops` and `k3s`.
+      Unblocked 2026-10-12: the first signed image (`sha256:0769ce23…`) is published, promoted into
+      `overlays/k3s` by `scripts/promote-image.sh`, and pullable anonymously, so k3s needs no pull secret.
 - [ ] **Built-in k3s components.** k3s ships with Traefik, ServiceLB, and local-path storage. Decide whether
       to keep Traefik or disable it and install ingress-nginx for parity with kind. Also note that k3s
       **does** enforce NetworkPolicy through its embedded kube-router, unlike kind, so re-test the Phase 2 policies.
@@ -501,6 +503,9 @@ the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
       Built: budget in bootstrap (whole account, 50/80/100% plus forecast), `Makefile`, and
       `.github/workflows/k3s-nightly-destroy.yml` (07:00 UTC, needs the `AWS_K3S_ROLE_ARN` repository variable).
       `make keep HOURS=72` skips it for a soak run (capped at 7 days). Run plan and costs: docs/k3s.md.
+      Bootstrap applied and the workflow verified 2026-10-12 (run 38356617495, a no-op destroy). The first
+      run failed AssumeRoleWithWebIdentity: this repo's OIDC tokens use GitHub's immutable subject
+      (`repo:owner@id/repo@id:...`), so the trust policy now matches that instead of the plain repo name.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
