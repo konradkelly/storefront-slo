@@ -23,9 +23,17 @@ http.setResponseCallback(http.expectedStatuses(200, 201, 402, 409));
 
 const json = { headers: { 'Content-Type': 'application/json' } };
 
+// Retried for up to 30s: on k3s, kube-router rejects a new pod's traffic until every node has added its IP to
+// the NetworkPolicy ipsets (1-2s after start), so the first request from the k6 pod can be refused.
 export function setup() {
-  const res = http.get(`${BASE}/products`);
-  return { ids: res.json().map((p) => p.id) };
+  for (let i = 0; i < 30; i++) {
+    const res = http.get(`${BASE}/products`, { responseCallback: http.expectedStatuses(200) });
+    if (res.status === 200) {
+      return { ids: res.json().map((p) => p.id) };
+    }
+    sleep(1);
+  }
+  throw new Error(`GET ${BASE}/products did not return 200 within 30s`);
 }
 
 function addToCart(cartId, productId) {
