@@ -1,6 +1,8 @@
 # Fault-injection knob for SLO drills on k3s. Argo CD self-heals, so `kubectl set env` would be reverted within
 # minutes: change the value here instead, with scripts/experiments/k3s-fault.sh. The commit is the injection and
 # its timestamp, and the revert is the remediation. 0.001 is the base value (k8s/base/storefront-api.yaml).
+# The unattended soak drill (scripts/experiments/soak_drill.py) overrides this on the Argo CD Application instead,
+# and while that override is set, it wins.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

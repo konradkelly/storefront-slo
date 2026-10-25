@@ -103,18 +103,24 @@ make down && make unkeep
 20 VUs of the `browse` profile is about 5 checkouts a minute. At 2 VUs (0.5 a minute) a couple of unlucky failures
 in a 30-minute window can page during a 2% slow burn, so the alerts would be testing noise instead of the design.
 
-**SLO drill on the soak** (`scripts/experiments/k3s-soak-drill.sh`): after a day of baseline, a 2% slow burn that
-should open a ticket and never page, reverted 30 minutes after the ticket; a day later, a 30% fast burn that should
-page, reverted 5 minutes after the page. Faults go in through git (`k3s-fault.sh` commits
-`k8s/overlays/k3s/payment-fault.yaml` with `[skip ci]`), because Argo CD reverts `kubectl set env` within minutes.
-The drill runs on your machine, logs a timeline like the Phase 1 experiments, and resumes from `soak-drill.state`
-if restarted:
+**SLO drill on the soak** (`k8s/monitoring/soak-drill.yaml`, `scripts/experiments/soak_drill.py`): after a day of
+baseline, a 2% slow burn that should open a ticket and never page, remediated 30 minutes after the ticket; a day
+later, a 30% fast burn that should page, remediated 5 minutes after the page. It runs in the cluster, so no laptop
+has to stay on. Argo CD reverts `kubectl set env` within minutes, so a fault is an override on the storefront
+Application (`spec.source.kustomize.patches`) that self-heal then holds in place, and remediation removes it. That
+needs no credentials outside the cluster; a git commit per fault would mean a push key inside it. The drill logs a
+timeline like the Phase 1 experiments, copies it to S3 next to the snapshots, and resumes after a restart:
 
 ```bash
-powershell -File scripts/experiments/keep-awake.ps1 -Minutes 4500   # in its own terminal
-SLOW_AT=2026-10-26T08:00:00Z PAGE_AT=2026-10-27T16:00:00Z END_AT=2026-10-28T07:25:00Z \
-  bash scripts/experiments/k3s-soak-drill.sh >> soak-drill.log 2>&1
+# set SLOW_AT, PAGE_AT and END_AT in the manifest first
+kubectl -n monitoring create configmap soak-drill-script --from-file=scripts/experiments/soak_drill.py \
+  --from-file=scripts/experiments/snap.py
+kubectl apply -f k8s/monitoring/soak-drill.yaml
+kubectl -n monitoring logs -f deploy/soak-drill -c drill
 ```
+
+For a hand-run fault in a short session, `scripts/experiments/k3s-fault.sh` commits the git knob
+(`k8s/overlays/k3s/payment-fault.yaml`) instead. An Application override, while one is set, wins over the knob.
 
 With a one-day baseline, expect the ticket after about 6.5 hours of slow burn, through the 3d & 6h pair: the "3d"
 window holds only what exists, about 30 hours. With three full days of history it would take about 15 hours.

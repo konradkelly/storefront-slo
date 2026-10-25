@@ -23,7 +23,7 @@ kubeconform -strict -summary -kubernetes-version 1.34.0 \
   k8s/argocd/storefront.yaml k8s/argocd/storefront-k3s.yaml \
   k8s/gateway/gateway.yaml k8s/gateway/gateway-k3s.yaml k8s/gateway/monitoring-routes.yaml \
   k8s/monitoring/alert-logger.yaml k8s/monitoring/node-alerts.yaml k8s/monitoring/grafana-snapshots.yaml \
-  k8s/loadtest/k6-job.yaml
+  k8s/monitoring/soak-drill.yaml k8s/loadtest/k6-job.yaml
 
 # Lint the deployable overlay: base intentionally leaves its image tag to overlays.
 # Supporting Gateway/logger/load-test manifests receive schema validation above.

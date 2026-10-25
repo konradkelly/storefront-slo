@@ -16,9 +16,8 @@ alertmanager/secrets/*
 k8s/monitoring/secrets/*
 !k8s/monitoring/secrets/README.md
 
-# k3s soak output: dashboard PNGs downloaded from S3, and the drill's log and progress
+# k3s soak output downloaded from S3: dashboard PNGs and the drill's timeline
 /grafana-snapshots/
-/soak-drill.*
 
 # Python bytecode
 __pycache__/

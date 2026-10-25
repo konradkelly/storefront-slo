@@ -1,0 +1,223 @@
+# k3s only: the soak drill (scripts/experiments/soak_drill.py) runs in the cluster, so no laptop has to stay on.
+# Set the three times in the Deployment for each run, then:
+#   kubectl -n monitoring create configmap soak-drill-script --from-file=scripts/experiments/soak_drill.py \
+#     --from-file=scripts/experiments/snap.py
+#   kubectl apply -f k8s/monitoring/soak-drill.yaml
+# Follow it: kubectl -n monitoring logs -f deploy/soak-drill -c drill
+# The timeline log is copied to the backup bucket every 5 minutes (grafana-snapshots/soak-drill.log), so make down
+# and the nightly destroy download it along with the snapshots. Stopping: kubectl delete -f this file, and remove the
+# fault override if a burn is on (the command is at the top of soak_drill.py).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: soak-drill
+  namespace: monitoring
+---
+# The fault is an override on this one Application: get and patch it, nothing else in argocd.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: soak-drill
+  namespace: argocd
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    resourceNames: ["storefront"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: soak-drill
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: soak-drill
+subjects:
+  - kind: ServiceAccount
+    name: soak-drill
+    namespace: monitoring
+---
+# Read-only: to see when a new rate has rolled out.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: soak-drill
+  namespace: storefront
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["storefront-api"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: soak-drill
+  namespace: storefront
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: soak-drill
+subjects:
+  - kind: ServiceAccount
+    name: soak-drill
+    namespace: monitoring
+---
+# Its own progress, and extra snapshot Jobs from the grafana-snapshots CronJob's template.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: soak-drill
+  namespace: monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["soak-drill-state"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    resourceNames: ["grafana-snapshots"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: soak-drill
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: soak-drill
+subjects:
+  - kind: ServiceAccount
+    name: soak-drill
+    namespace: monitoring
+---
+# The drill writes phase and since here. No data in this manifest, so re-applying it never resets a run; for a new
+# run: kubectl -n monitoring delete configmap soak-drill-state, then apply again.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: soak-drill-state
+  namespace: monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soak-drill
+  namespace: monitoring
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # never two drills at once
+  selector:
+    matchLabels:
+      app: soak-drill
+  template:
+    metadata:
+      labels:
+        app: soak-drill
+    spec:
+      serviceAccountName: soak-drill
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # A replacement pod continues the log instead of starting a new one.
+        - name: fetch-log
+          image: amazon/aws-cli:2.38.5
+          command: ["sh", "-c"]
+          args:
+            - aws s3 cp "s3://$BUCKET/grafana-snapshots/soak-drill.log" /log/soak-drill.log --only-show-errors || true
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env: &s3-env
+            - name: HOME
+              value: /tmp
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-snapshots-s3
+                  key: ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-snapshots-s3
+                  key: ACCESS_SECRET_KEY
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-snapshots-s3
+                  key: AWS_REGION
+            - name: BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-snapshots-s3
+                  key: BUCKET
+          volumeMounts: &s3-mounts
+            - name: log
+              mountPath: /log
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: drill
+          image: python:3.13.16-alpine3.23
+          command: ["python", "/scripts/soak_drill.py"]
+          securityContext: *restricted
+          env:
+            - name: SLOW_AT
+              value: "2026-10-26T08:00:00Z"
+            - name: PAGE_AT
+              value: "2026-10-27T16:00:00Z"
+            - name: END_AT
+              value: "2026-10-28T07:25:00Z"
+            - name: PROM
+              value: http://kps-kube-prometheus-stack-prometheus.monitoring:9090
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: log
+              mountPath: /log
+        - name: ship-log
+          image: amazon/aws-cli:2.38.5
+          command: ["sh", "-c"]
+          args:
+            - |
+              ship() { aws s3 cp /log/soak-drill.log "s3://$BUCKET/grafana-snapshots/soak-drill.log" --only-show-errors; }
+              trap 'ship; exit 0' TERM
+              while true; do sleep 300 & wait $!; [ -s /log/soak-drill.log ] && ship; done
+          securityContext: *restricted
+          env: *s3-env
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          volumeMounts: *s3-mounts
+      volumes:
+        - name: script
+          configMap:
+            name: soak-drill-script
+        - name: log
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
