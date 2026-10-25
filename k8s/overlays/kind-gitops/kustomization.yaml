@@ -7,4 +7,4 @@ resources:
 images:
   - name: storefront-api
     newName: ghcr.io/konradkelly/storefront-slo
-    digest: sha256:b53510ed03f82915e193d0a8e8dd4774c9241ac9ff03d25084a56d4854dacf3f
+    digest: sha256:60351ecd2bf5d960c4049805fb4f213a929847dcee38ddfd8f110bf8319acb2d
