@@ -13,6 +13,8 @@ reason=${2:-}
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 FILE=k8s/overlays/k3s/payment-fault.yaml
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/storefront-k3s.yaml}"
+# MSYS_NO_PATHCONV below also stops Git Bash converting this for kubectl.exe, so hand it a Windows path.
+command -v cygpath >/dev/null && KUBECONFIG=$(cygpath -w "$KUBECONFIG")
 k() { MSYS_NO_PATHCONV=1 kubectl --context k3s-storefront "$@"; }
 event() { echo "$(date -u +%H:%M:%S) EVENT $*"; }
 

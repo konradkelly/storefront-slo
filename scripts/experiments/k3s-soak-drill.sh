@@ -25,6 +25,8 @@ SLOW_MAX_H=${SLOW_MAX_H:-14}             # revert anyway if no ticket by then
 PAGE_MAX_MIN=${PAGE_MAX_MIN:-60}         # revert anyway if no page by then
 STATE="${STATE:-$REPO/soak-drill.state}"
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/storefront-k3s.yaml}"
+# MSYS_NO_PATHCONV below also stops Git Bash converting this for kubectl.exe, so hand it a Windows path.
+command -v cygpath >/dev/null && KUBECONFIG=$(cygpath -w "$KUBECONFIG")
 server_ip=$(kubectl config view -o jsonpath='{.clusters[0].cluster.server}' | sed -E 's#https://([^:]+):.*#\1#')
 export PROM="${PROM:-http://prometheus.$server_ip.sslip.io}"
 
