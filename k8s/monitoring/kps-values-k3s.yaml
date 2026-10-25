@@ -5,3 +5,18 @@ prometheus:
     # In Grafana Cloud it tells the environments apart, and 4c's GKE/AKS clusters will get their own values.
     externalLabels:
       cluster: k3s-aws
+
+# Server-side rendering (headless Chromium) for k8s/monitoring/grafana-snapshots.yaml, which saves dashboard PNGs
+# to S3 so a soak run keeps pictures after make down. The chart wires Grafana's rendering URLs to it.
+grafana:
+  imageRenderer:
+    enabled: true
+    image:
+      tag: v5.12.9 # the chart's default is latest with pullPolicy Always
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        memory: 1Gi

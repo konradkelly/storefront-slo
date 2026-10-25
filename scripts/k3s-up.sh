@@ -79,7 +79,7 @@ install_gateway k8s/gateway/gateway-k3s.yaml
 # to <ip> without any DNS setup.
 sed "s/\.localhost\]/.$server_ip.sslip.io]/" k8s/gateway/monitoring-routes.yaml | k apply -f -
 
-step "storefront namespace and backup credentials"
+step "storefront namespace, backup credentials, hourly Grafana snapshots"
 k apply -f k8s/base/namespace.yaml # with its Pod Security labels; Argo CD adopts it
 creds=$(mktemp)
 (umask 077 && {
@@ -88,7 +88,10 @@ creds=$(mktemp)
   echo "AWS_REGION=$region"
 } > "$creds")
 k -n storefront create secret generic storefront-backup-s3 --from-env-file="$creds" --dry-run=client -o yaml | k apply -f -
+k -n monitoring create secret generic grafana-snapshots-s3 --from-env-file="$creds" \
+  --from-literal=BUCKET="$(tf output -raw backup_bucket)" --dry-run=client -o yaml | k apply -f -
 rm -f "$creds"
+k apply -f k8s/monitoring/grafana-snapshots.yaml
 
 step "Argo CD (deploys k8s/overlays/k3s from GitHub main)"
 bash scripts/argocd-up.sh k3s

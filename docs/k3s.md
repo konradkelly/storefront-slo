@@ -91,14 +91,38 @@ short windows have something to compare against.
 **Soak run:**
 
 ```bash
-make up && make keep HOURS=72          # the nightly destroy skips until then (capped at 7 days)
+make up && make keep HOURS=76          # the nightly destroy skips until then (capped at 7 days)
 export KUBECONFIG=~/.kube/storefront-k3s.yaml
 kubectl --context k3s-storefront -n storefront create configmap k6-script --from-file=loadtest/checkout.js
 sed 's/name: k6-load/name: k6-soak/' k8s/loadtest/k6-job.yaml |
-  kubectl set env --local -f - DURATION=72h VUS=2 -o yaml | kubectl --context k3s-storefront apply -f -
+  kubectl set env --local -f - DURATION=72h VUS=20 -o yaml | kubectl --context k3s-storefront apply -f -
 # ...72 hours later
 make down && make unkeep
 ```
+
+20 VUs of the `browse` profile is about 5 checkouts a minute. At 2 VUs (0.5 a minute) a couple of unlucky failures
+in a 30-minute window can page during a 2% slow burn, so the alerts would be testing noise instead of the design.
+
+**SLO drill on the soak** (`scripts/experiments/k3s-soak-drill.sh`): after a day of baseline, a 2% slow burn that
+should open a ticket and never page, reverted 30 minutes after the ticket; a day later, a 30% fast burn that should
+page, reverted 5 minutes after the page. Faults go in through git (`k3s-fault.sh` commits
+`k8s/overlays/k3s/payment-fault.yaml` with `[skip ci]`), because Argo CD reverts `kubectl set env` within minutes.
+The drill runs on your machine, logs a timeline like the Phase 1 experiments, and resumes from `soak-drill.state`
+if restarted:
+
+```bash
+powershell -File scripts/experiments/keep-awake.ps1 -Minutes 4500   # in its own terminal
+SLOW_AT=2026-10-26T08:00:00Z PAGE_AT=2026-10-27T16:00:00Z END_AT=2026-10-28T07:25:00Z \
+  bash scripts/experiments/k3s-soak-drill.sh >> soak-drill.log 2>&1
+```
+
+With a one-day baseline, expect the ticket after about 6.5 hours of slow burn, through the 3d & 6h pair: the "3d"
+window holds only what exists, about 30 hours. With three full days of history it would take about 15 hours.
+
+**Pictures:** a CronJob (`k8s/monitoring/grafana-snapshots.yaml`) renders both dashboards every hour through
+Grafana's image renderer and copies them to the backup bucket. `make down` downloads them to `grafana-snapshots/`,
+and the nightly destroy saves them as a workflow artifact first. For an extra set at any moment:
+`kubectl -n monitoring create job --from=cronjob/grafana-snapshots snap-<event>`.
 
 ## What I had to run myself
 

@@ -10,6 +10,9 @@ cd "$(dirname "$0")/.."
 tf() { terraform -chdir=terraform/aws/k3s "$@"; }
 account=$(aws sts get-caller-identity --query Account --output text)
 tf init -input=false -reconfigure -backend-config="bucket=storefront-pulse-tfstate-$account" >/dev/null
+# The bucket goes with the environment, so keep the dashboard pictures (k8s/monitoring/grafana-snapshots.yaml).
+aws s3 sync "s3://storefront-k3s-backups-$account/grafana-snapshots/" grafana-snapshots/ --no-progress >/dev/null &&
+  echo "Grafana snapshots saved in grafana-snapshots/" || true
 tf destroy -input=false -auto-approve
 rm -f "$HOME/.kube/storefront-k3s.yaml" terraform/aws/k3s/admin.auto.tfvars.json
 echo "k3s environment destroyed."

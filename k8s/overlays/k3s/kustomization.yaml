@@ -32,6 +32,8 @@ patches:
             isWALArchiver: true
             parameters:
               barmanObjectName: storefront-backups
+  # PAYMENT_FAILURE_RATE, the knob scripts/experiments/k3s-fault.sh turns.
+  - path: payment-fault.yaml
 
 # Keep images last: scripts/promote-image.sh rewrites everything after this line.
 images:

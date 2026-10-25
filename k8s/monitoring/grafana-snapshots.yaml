@@ -1,0 +1,131 @@
+# k3s only, applied by scripts/k3s-up.sh. Every hour, renders the SLO and API dashboards through Grafana's image
+# renderer (kps-values-k3s.yaml) and copies the PNGs to the backup bucket under grafana-snapshots/. Pictures of a
+# soak run outlive the cluster: scripts/k3s-down.sh downloads them to grafana-snapshots/, and the nightly destroy
+# saves them as a workflow artifact, before the bucket is deleted.
+#
+# Ranges: 6h and 24h every hour, plus 3d at 00, 06, 12 and 18 UTC. An extra set at a moment that matters, which
+# also renders 3d: kubectl -n monitoring create job --from=cronjob/grafana-snapshots snap-<event>
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: grafana-snapshots
+  namespace: monitoring
+spec:
+  schedule: "17 * * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: render
+              image: curlimages/curl:8.23.0
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: GF_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: kps-grafana
+                      key: admin-user
+                - name: GF_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kps-grafana
+                      key: admin-password
+                - name: JOB
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.labels['batch.kubernetes.io/job-name']
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -u
+                  now=$(date -u +%Y-%m-%dT%H%MZ)
+                  # Scheduled runs: one folder per day. Manual runs: events/, named after the job.
+                  case "$JOB" in
+                    grafana-snapshots-*) dir=/out/${now%%T*} prefix=$now ranges="6h 24h"
+                      [ $(( $(date -u +%-H) % 6 )) -eq 0 ] && ranges="$ranges 3d" ;;
+                    *) dir=/out/events prefix=$now-$JOB ranges="6h 24h 3d" ;;
+                  esac
+                  mkdir -p "$dir"
+                  render() { # uid, name, height, range, extra query
+                    curl -sf --max-time 150 -u "$GF_USER:$GF_PASSWORD" -o "$dir/$prefix-$2-$4.png" \
+                      "http://kps-grafana.monitoring.svc/render/d/$1?orgId=1&from=now-$4&to=now&tz=UTC&width=1600&height=$3&kiosk&timeout=120$5" \
+                      || { echo "render failed: $2 $4"; rm -f "$dir/$prefix-$2-$4.png"; }
+                  }
+                  for r in $ranges; do
+                    render storefront-slo slo 1500 "$r" "&var-window=1d" # the dashboard's own advice for the lab
+                    render storefront-api api 1650 "$r" ""
+                  done
+                  ls -l "$dir"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+              volumeMounts:
+                - name: out
+                  mountPath: /out
+          containers:
+            - name: upload
+              image: amazon/aws-cli:2.38.5
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              # The backup bucket's access key (terraform/aws/k3s/backups.tf), copied here by scripts/k3s-up.sh.
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-snapshots-s3
+                      key: ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-snapshots-s3
+                      key: ACCESS_SECRET_KEY
+                - name: AWS_REGION
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-snapshots-s3
+                      key: AWS_REGION
+                - name: BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-snapshots-s3
+                      key: BUCKET
+              args: ["s3", "cp", "/out", "s3://$(BUCKET)/grafana-snapshots/", "--recursive", "--no-progress"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+              volumeMounts:
+                - name: out
+                  mountPath: /out
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: out
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}

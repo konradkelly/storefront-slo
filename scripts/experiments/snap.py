@@ -1,11 +1,12 @@
 """One timeline line per call: checkout-availability burn rates, budget left, and alert states."""
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-PROM = "http://localhost:9090"
+PROM = os.environ.get("PROM", "http://localhost:9090")  # k3s: http://prometheus.<server IP>.sslip.io
 SLO = "checkout_availability"
 
 
