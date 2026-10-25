@@ -31,7 +31,8 @@ region=$(tf output -raw region)
 step "kubeconfig (the server publishes it to SSM Parameter Store once k3s is up)"
 param=$(tf output -raw kubeconfig_parameter)
 for i in $(seq 90); do
-  value=$(aws ssm get-parameter --region "$region" --name "$param" --with-decryption --query Parameter.Value --output text)
+  # MSYS_NO_PATHCONV: Git Bash would rewrite the "/storefront-k3s/..." name as a Windows path.
+  value=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter --region "$region" --name "$param" --with-decryption --query Parameter.Value --output text)
   [ "$value" != pending ] && break
   [ "$i" = 90 ] && { echo "k3s didn't publish a kubeconfig in 15 minutes. Read /var/log/storefront-k3s-init.log on the server:"; \
     echo "  aws ssm start-session --target $(tf output -raw server_instance_id)"; exit 1; }

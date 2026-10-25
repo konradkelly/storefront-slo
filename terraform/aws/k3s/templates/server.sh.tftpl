@@ -36,7 +36,7 @@ until /usr/local/bin/k3s kubectl get --raw /readyz >/dev/null 2>&1; do sleep 5; 
 # Publish an admin kubeconfig that points at the Elastic IP, with the context named k3s-storefront.
 kubeconfig=$(mktemp)
 sed -E -e 's#https://127\.0\.0\.1:6443#https://${public_ip}:6443#' \
-  -e 's/^(\s*(name|cluster|user|current-context): )default$/\1k3s-storefront/' \
+  -e 's/^(\s*(- )?(name|cluster|user|current-context): )default$/\1k3s-storefront/' \
   /etc/rancher/k3s/k3s.yaml > "$kubeconfig"
 aws ssm put-parameter --region ${region} --name ${kubeconfig_param} --type SecureString \
   --tier Intelligent-Tiering --overwrite --value "file://$kubeconfig" >/dev/null
