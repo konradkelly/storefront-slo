@@ -438,6 +438,78 @@
           "legendFormat": "{{pod}}"
         }
       ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Load generator (k6): failed requests",
+      "description": "What the k6 load test saw, pushed by k6 itself (k8s/loadtest/k6-job.yaml). Failed means a connection error, timeout or unexpected status: payment declines (402) and out of stock (409) are expected outcomes. A request that never reaches the API, like a refused connection during a rollout, shows up only here. Right axis: all k6 requests, to show it was running.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "all requests/min"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (name, status) (increase(k6_http_reqs_total{expected_response=\"false\"}[1m]))",
+          "legendFormat": "{{name}} {{status}} failed/min"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(increase(k6_http_reqs_total[1m]))",
+          "legendFormat": "all requests/min"
+        }
+      ]
     }
   ]
 }

@@ -34,6 +34,17 @@ spec:
             # browse (realistic, default) or checkout-stress (saga vs. single-tx experiment)
             - name: PROFILE
               value: browse
+            # The client's view as time series in Prometheus (its remote-write receiver, kps-values.yaml), next to
+            # the API's own metrics: failures that never reach the API, such as refused connections, show up only
+            # here. Trends go out as these stats per push. For runs longer than a few hours, also set
+            # K6_SUMMARY_MODE=disabled and K6_NO_THRESHOLDS=true: otherwise k6 keeps every timing sample in memory
+            # for its end-of-test summary (1.3 GiB after a 72-hour soak). Experiments 3-5 read that summary.
+            - name: K6_OUT
+              value: experimental-prometheus-rw
+            - name: K6_PROMETHEUS_RW_SERVER_URL
+              value: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090/api/v1/write
+            - name: K6_PROMETHEUS_RW_TREND_STATS
+              value: p(95),p(99),max
           volumeMounts:
             - name: script
               mountPath: /scripts

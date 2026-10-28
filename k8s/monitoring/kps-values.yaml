@@ -27,6 +27,9 @@ prometheus:
     # Storage is an emptyDir: a Prometheus pod restart starts from empty (fine for a lab).
     retention: 30d
     retentionSize: 4GB
+    # k6 Jobs push their client-side metrics here (k8s/loadtest/k6-job.yaml). Nothing else can reach it: the
+    # storefront NetworkPolicies let only the load-test pods out to port 9090.
+    enableRemoteWriteReceiver: true
     resources:
       requests:
         cpu: 200m

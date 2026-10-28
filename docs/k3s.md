@@ -95,13 +95,19 @@ make up && make keep HOURS=76          # the nightly destroy skips until then (c
 export KUBECONFIG=~/.kube/storefront-k3s.yaml
 kubectl --context k3s-storefront -n storefront create configmap k6-script --from-file=loadtest/checkout.js
 sed 's/name: k6-load/name: k6-soak/' k8s/loadtest/k6-job.yaml |
-  kubectl set env --local -f - DURATION=72h VUS=20 -o yaml | kubectl --context k3s-storefront apply -f -
+  kubectl set env --local -f - DURATION=72h VUS=20 K6_SUMMARY_MODE=disabled K6_NO_THRESHOLDS=true -o yaml |
+  kubectl --context k3s-storefront apply -f -
 # ...72 hours later
 make down && make unkeep
 ```
 
-20 VUs of the `browse` profile is about 5 checkouts a minute. At 2 VUs (0.5 a minute) a couple of unlucky failures
+20 VUs of the `browse` profile is about 10 checkouts a minute. At 2 VUs (0.5 a minute) a couple of unlucky failures
 in a 30-minute window can page during a 2% slow burn, so the alerts would be testing noise instead of the design.
+
+k6 pushes its own view to Prometheus (the "Load generator (k6)" panel), so a soak needs no end-of-test summary.
+Turn the summary and thresholds off for long runs: with either on, k6 keeps every timing sample in memory. The
+October soak's k6 grew to 1.3 GiB over 72 hours and took its node down to 7.8% free memory, just short of the
+`NodeMemoryLow` ticket.
 
 **SLO drill on the soak** (`k8s/monitoring/soak-drill.yaml`, `scripts/experiments/soak_drill.py`): after a day of
 baseline, a 2% slow burn that should open a ticket and never page, remediated 30 minutes after the ticket; a day

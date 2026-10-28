@@ -25,7 +25,7 @@ prometheus:
           - sourceLabels: [__name__]
             action: keep
             regex: >-
-              slo:.*|ALERTS|up|storefront_.*|http_server_requests_seconds_(bucket|count|sum)|hikaricp_connections_(active|pending)|kube_pod_container_status_restarts_total|node_memory_Mem(Available|Total)_bytes|node_filesystem_(avail|size)_bytes|node_cpu_seconds_total|cnpg_collector_up|cnpg_pg_replication_lag|cnpg_pg_stat_archiver_.*
+              slo:.*|ALERTS|up|storefront_.*|k6_http_reqs_total|http_server_requests_seconds_(bucket|count|sum)|hikaricp_connections_(active|pending)|kube_pod_container_status_restarts_total|node_memory_Mem(Available|Total)_bytes|node_filesystem_(avail|size)_bytes|node_cpu_seconds_total|cnpg_collector_up|cnpg_pg_replication_lag|cnpg_pg_stat_archiver_.*
           # Probes and scrapes hit /actuator every few seconds. They're not customer traffic and no SLO counts them.
           - sourceLabels: [__name__, uri]
             action: drop

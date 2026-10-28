@@ -151,3 +151,13 @@ spec:
               app: storefront-api
       ports:
         - { protocol: TCP, port: 8080 }
+    # k6 pushes its own metrics to Prometheus's remote-write receiver (k8s/loadtest/k6-job.yaml).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 9090 }

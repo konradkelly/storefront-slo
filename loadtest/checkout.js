@@ -23,11 +23,16 @@ http.setResponseCallback(http.expectedStatuses(200, 201, 402, 409));
 
 const json = { headers: { 'Content-Type': 'application/json' } };
 
+// Every request is named after the API's route template (its `uri` label), so k6's metrics line up with the
+// API's. k6 also uses the name as the `url` tag, so the URL's cart ID no longer makes a series per cart: unnamed,
+// a 72-hour soak tracked 800,000 of them. Each iteration still uses its own cart.
+const named = (name, params = {}) => ({ ...params, tags: { ...params.tags, name } });
+
 // Retried for up to 30s: on k3s, kube-router rejects a new pod's traffic until every node has added its IP to
 // the NetworkPolicy ipsets (1-2s after start), so the first request from the k6 pod can be refused.
 export function setup() {
   for (let i = 0; i < 30; i++) {
-    const res = http.get(`${BASE}/products`, { responseCallback: http.expectedStatuses(200) });
+    const res = http.get(`${BASE}/products`, named('/products', { responseCallback: http.expectedStatuses(200) }));
     if (res.status === 200) {
       return { ids: res.json().map((p) => p.id) };
     }
@@ -38,22 +43,22 @@ export function setup() {
 
 function addToCart(cartId, productId) {
   const quantity = 1 + Math.floor(Math.random() * 2);
-  http.post(`${BASE}/cart/items`, JSON.stringify({ cartId, productId, quantity }), json);
+  http.post(`${BASE}/cart/items`, JSON.stringify({ cartId, productId, quantity }), named('/cart/items', json));
 }
 
 function checkout(cartId) {
-  const res = http.post(`${BASE}/orders`, JSON.stringify({ cartId }), json);
+  const res = http.post(`${BASE}/orders`, JSON.stringify({ cartId }), named('/orders', json));
   check(res, { 'checkout handled': (r) => [201, 402, 409].includes(r.status) });
 }
 
 function browseSession(cartId, pick) {
-  http.get(`${BASE}/products`);
+  http.get(`${BASE}/products`, named('/products'));
   sleep(0.5 + Math.random());
 
   // Look at 3 to 8 products
   const views = 3 + Math.floor(Math.random() * 6);
   for (let i = 0; i < views; i++) {
-    http.get(`${BASE}/products/${pick()}`);
+    http.get(`${BASE}/products/${pick()}`, named('/products/{id}'));
     sleep(0.5 + Math.random());
   }
 
@@ -65,7 +70,7 @@ function browseSession(cartId, pick) {
   for (let i = 0; i < count; i++) {
     addToCart(cartId, pick());
   }
-  http.get(`${BASE}/cart/${cartId}`);
+  http.get(`${BASE}/cart/${cartId}`, named('/cart/{cartId}'));
 
   if (Math.random() < 0.5) {
     checkout(cartId);
@@ -74,8 +79,8 @@ function browseSession(cartId, pick) {
 
 function checkoutStressSession(cartId, pick) {
   // Browse
-  http.get(`${BASE}/products`);
-  http.get(`${BASE}/products/${pick()}`);
+  http.get(`${BASE}/products`, named('/products'));
+  http.get(`${BASE}/products/${pick()}`, named('/products/{id}'));
   sleep(Math.random());
 
   // Add 1 to 3 items
