@@ -136,6 +136,15 @@ Grafana's image renderer and copies them to the backup bucket. `make down` downl
 and the nightly destroy saves them as a workflow artifact first. For an extra set at any moment:
 `kubectl -n monitoring create job --from=cronjob/grafana-snapshots snap-<event>`.
 
+**Results, October 25-28.** Both drills behaved as designed. The slow burn opened a ticket after 6h 12m and never
+paged, and the fast burn paged after 13m 45s. Postmortems:
+[slow burn](postmortems/2026-10-26-k3s-soak-slow-burn.md), [fast burn](postmortems/2026-10-27-k3s-soak-fast-burn.md).
+Across 72 hours: no container restarts, 4 of 4 daily base backups and 864 WAL files archived with no failures,
+replication lag at most 1.5s, p95 checkout latency steady around 236 ms, and 1 failed k6 request in 4.26 million.
+One problem: k6 grew to 1.3 GiB and took its node to 7.8% free memory (fixed in `cf74166`, see the soak run above).
+
+![Checkout availability over the whole soak: the slow burn on Oct 26 and the fast-burn spike on Oct 27](postmortems/img/2026-10-28-k3s-soak-3d.png)
+
 ## What I had to run myself
 
 Phase 4b is structured around this list: each row is something EKS, or another AWS service, takes over.
