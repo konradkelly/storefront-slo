@@ -82,7 +82,7 @@ Size runs by the alert windows, not the calendar:
 | Run | Duration | Cost |
 |-----|----------|------|
 | Shakedown: `make up` works, fill in the list below | 2-3 h | ~$0.50 |
-| Experiment sessions: control plane stop, agent stop, NetworkPolicy re-test, backup restore drill | 2-4 h each | ~$0.50 each |
+| Experiment sessions: control plane stop, agent stop, NetworkPolicy re-test, backup restore drill (all four done in one 2-hour session on Oct 29) | 2-4 h each | ~$0.50 each |
 | Soak: steady low load, to see ticket alerts, daily backups, memory/disk trends on real data | 72 h (24 h if tight) | ~$11 ($3.60) |
 
 About $15 for the whole phase. Give each session ~30 minutes of baseline load before breaking anything, so the
@@ -158,15 +158,56 @@ Phase 4b is structured around this list: each row is something EKS, or another A
 | **Cluster secrets** | Join token and admin kubeconfig in SSM Parameter Store, `--secrets-encryption` for etcd/SQLite | Rotation is manual. |
 | **Load balancing** | ServiceLB claims port 80 on every node; the Elastic IP points at the server | All traffic enters through the server's IP. If the server stops, so does ingress, even though agents still run Envoy. |
 | **Storage** | local-path: each PVC is a directory on one node's root disk | A Postgres volume dies with its node. WAL archiving and daily base backups to S3 cover data, not availability. |
-| **Database backups** | CloudNativePG Barman Cloud plugin + cert-manager → S3, bucket destroyed by `make down` | Backups don't outlive the environment. |
-| **NetworkPolicy** | k3s's embedded kube-router enforces it (unlike kind's default CNI) | Re-test with `scripts/netpol-check.sh` (done when: same results as on kind). |
+| **Database backups** | CloudNativePG Barman Cloud plugin + cert-manager → S3, bucket destroyed by `make down` | Backups don't outlive the environment. The plugin runs one pod, and while it's down CNPG doesn't fail over at all (tested: 3m 57s with no failover). |
+| **NetworkPolicy** | k3s's embedded kube-router enforces it (unlike kind's default CNI) | Same results as Calico on kind once a pod runs (`scripts/netpol-check.sh k3s`). But kube-router programs a new pod 0.3-0.9 s after it starts: until then its egress is open, and other pods' allow lists don't include it yet. |
+| **Where system pods run** | Wherever the scheduler puts them. k3s doesn't taint its server, so it got the Postgres primary, the only CoreDNS replica and Alertmanager | Stopping the server took the database, DNS and alert delivery with the control plane. Stopping an agent moved its pods onto the server until the server stalled. A managed control plane isn't a node the scheduler can fill. |
+| **Memory for the node itself** | Nothing reserved for k3s or the OS (`--kube-reserved`, `--system-reserved`) | An overcommitted node stalls instead of evicting pods. On the server, that stalls the control plane too. |
 | **Node health** | `k8s/monitoring/node-alerts.yaml` (disk, memory) → ticket | You patch the OS and replace nodes yourself. |
 
 Add a row whenever 4a makes you do something by hand.
 
-## Experiment: stop the control plane
+## Experiment: stop the control plane, then an agent
 
-While k6 runs (`k8s/loadtest/k6-job.yaml`), stop the server: `aws ec2 stop-instances --instance-ids <server>`.
-Expect traffic through the Elastic IP to stop with it (it terminates on the server). Agents keep their pods
-running, but nothing can be scheduled, scaled or rolled out until the server is back. Measure the error budget
-spent, then repeat by stopping an agent instead. Write it up with docs/postmortem-template.md.
+Start k6 first, on a node the run won't stop: add `nodeSelector: {kubernetes.io/hostname: <agent-1 node>}` to the
+soak command above. Then:
+
+```bash
+bash scripts/experiments/k3s-node-stop.sh server              # BASELINE_MIN=5 STOP_MIN=10 RECOVERY_MIN=15
+STOP_MIN=7 bash scripts/experiments/k3s-node-stop.sh agent-0  # 7 min: past the 5-minute eviction
+```
+
+The script stops and starts the instance and logs a state line every 30 seconds. Two probers run on your machine:
+one through the Elastic IP, and one through another node's own address, which shows what a load balancer in front
+of every node would have kept serving. The probers count time rather than completed requests, so they see outages
+that the SLIs miss (see below). Check where things run first: the outcome depends on which pods are on the node
+you stop.
+
+**Results, October 29.** Neither experiment paged, and both did far more damage than predicted.
+
+- **Server, 10 minutes stopped:** a 12-minute total outage, not the ingress-only one predicted. The server also ran
+  the Postgres primary, the only CoreDNS replica and Alertmanager. Without the API server no standby could be
+  promoted, and without Alertmanager no alert could go out. The checkout SLI recorded no checkout attempts at all:
+  every request took 30-60 seconds to fail, k6 waits for each answer before sending the next request, and no
+  session got through its catalog pages to checkout. Real cost:
+  30% of the 28-day catalog budget. Recorded: 0.3%. Service was back 45 seconds after the instance was running.
+  [Postmortem](postmortems/2026-10-29-k3s-control-plane-stop.md).
+- **Agent, 7 minutes stopped:** 47 seconds of failures, as predicted. Then the 5-minute eviction moved an API
+  replica, Grafana and an Envoy proxy onto the server, which went from 72% to 97% memory, stalled, and took the
+  control plane with it. Checkouts fell by 75% for ten minutes, until a manual reboot and moving the pods back.
+  While the agent was down, the database operator couldn't reconcile: the backup plugin's only pod was on it. A
+  follow-up test showed that CNPG doesn't fail over at all while that plugin is down.
+  [Postmortem](postmortems/2026-10-29-k3s-agent-stop.md).
+
+## Restore drill
+
+Rebuild the database from S3 alone, into a separate namespace, and compare it with the live one at a named restore
+point. Steps in [k8s/monitoring/restore-drill.yaml](../k8s/monitoring/restore-drill.yaml). A named target, unlike
+a time, needs the `backupID` of the base backup to start from.
+
+**Results, October 29.** The restore took **58 seconds** from `kubectl apply` to a ready primary: base backup plus
+WAL replay to the restore point. At that point both databases had 43 orders, 89 order lines and 43 paid orders, and
+an MD5 over every column of `orders` matched. The restored cluster stopped exactly at the restore point and
+promoted itself to timeline 2.
+
+What it doesn't cover: the database was 7 minutes old, so replay was short. And a WAL segment is archived when it
+fills or after `archive_timeout` (5 minutes), so losing both instances at once can lose up to 5 minutes of writes.

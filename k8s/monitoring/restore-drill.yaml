@@ -1,0 +1,71 @@
+# Backup restore drill (k3s): rebuild the database from S3 alone, base backup + WAL replay, into a separate
+# namespace, and compare it with the live one at a named restore point. Nothing here touches storefront-db or its
+# archive: the restored cluster reads the archive and has no WAL archiver of its own.
+#
+# Its own namespace, because the storefront namespace's default-deny NetworkPolicies only let pods labeled
+# cnpg.io/cluster=storefront-db reach S3 and the Kubernetes API.
+#
+#   1. On the live primary, mark a restore point and close the WAL segment so it is archived:
+#        SELECT pg_create_restore_point('drill'), count(*) FROM orders; SELECT pg_switch_wal();
+#   2. kubectl create namespace restore-drill
+#      kubectl -n storefront get secret storefront-backup-s3 -o yaml | sed '/namespace:/d; /uid:/d; /resourceVersion:/d;
+#        /creationTimestamp:/d' | kubectl -n restore-drill apply -f -
+#   3. Pick the base backup taken before the restore point (a named target, unlike a time, can't choose one itself):
+#        id=$(kubectl -n storefront get backup -o jsonpath='{.items[-1:].status.backupId}')
+#        sed "s/BACKUP_ID/$id/" k8s/monitoring/restore-drill.yaml | kubectl apply -f -
+#   4. Compare the same queries on storefront-db-restore-1, then: kubectl delete namespace restore-drill
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: storefront-backups
+  namespace: restore-drill
+spec:
+  # Same archive as k8s/overlays/k3s/backups.yaml. No retentionPolicy: this copy only reads.
+  configuration:
+    destinationPath: s3://storefront-k3s-backups-675901257165/storefront-db
+    s3Credentials:
+      accessKeyId:
+        name: storefront-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: storefront-backup-s3
+        key: ACCESS_SECRET_KEY
+      region:
+        name: storefront-backup-s3
+        key: AWS_REGION
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: storefront-db-restore
+  namespace: restore-drill
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.14-minimal-trixie
+  bootstrap:
+    recovery:
+      source: origin
+      database: storefront
+      owner: storefront
+      recoveryTarget:
+        backupID: BACKUP_ID # step 3
+        targetName: drill # the name passed to pg_create_restore_point
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: storefront-backups
+          serverName: storefront-db # the folder under destinationPath that the live cluster archives into
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi

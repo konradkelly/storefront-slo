@@ -1,10 +1,18 @@
 #!/bin/bash
 # Checks the storefront NetworkPolicies both ways: what should connect does, and what shouldn't is blocked.
 # Starts short-lived test pods (restricted-compliant) that try a TCP connection and report it.
-#   bash scripts/netpol-check.sh
+#   bash scripts/netpol-check.sh          (kind, Calico)
+#   bash scripts/netpol-check.sh k3s      (k3s on EC2, kube-router; the Gateway through the server's Elastic IP)
 set -u
 cd "$(dirname "$0")/.."
-k() { MSYS_NO_PATHCONV=1 kubectl --context kind-storefront "$@"; }
+if [ "${1:-kind}" = k3s ]; then
+  export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/storefront-k3s.yaml}"
+  command -v cygpath >/dev/null && KUBECONFIG=$(cygpath -w "$KUBECONFIG") # MSYS_NO_PATHCONV below: a Windows path
+  CTX=k3s-storefront GW=http://$(terraform -chdir=terraform/aws/k3s output -raw server_public_ip)
+else
+  CTX=kind-storefront GW=http://storefront.localhost
+fi
+k() { MSYS_NO_PATHCONV=1 kubectl --context "$CTX" "$@"; }
 fails=0
 
 # probe <name> <labels or ""> <host> <port> <expect: ALLOW|DENY>
@@ -13,9 +21,11 @@ probe() {
   local lbl=""; [ -n "$labels" ] && lbl="--labels=$labels"
   local out
   # Not `run -i --rm`: the pod can finish before kubectl attaches, and the output is lost.
+  # The 3 s sleep: kube-router (k3s) programs a new pod's rules up to ~1 s after it starts. Until then its egress is
+  # open and other pods' allow lists don't include it yet, so connecting at once tests that race, not the policy.
   k -n storefront delete pod "np-$name" --ignore-not-found >/dev/null 2>&1
   k -n storefront run "np-$name" --image=python:3.13.16-alpine --restart=Never $lbl \
-    --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"np","image":"python:3.13.16-alpine","securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}},"command":["python","-c","import socket,sys\ntry:\n  socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=4).close(); print(\"ALLOW\")\nexcept Exception as e:\n  print(\"DENY\", type(e).__name__)","'"$host"'","'"$port"'"]}]}}' >/dev/null
+    --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"np","image":"python:3.13.16-alpine","securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}},"command":["python","-c","import socket,sys,time\ntime.sleep(3)\ntry:\n  socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=4).close(); print(\"ALLOW\")\nexcept Exception as e:\n  print(\"DENY\", type(e).__name__)","'"$host"'","'"$port"'"]}]}}' >/dev/null
   k -n storefront wait --for=jsonpath='{.status.phase}'=Succeeded "pod/np-$name" --timeout=90s >/dev/null 2>&1
   out=$(k -n storefront logs "np-$name" 2>&1 | grep -E "^(ALLOW|DENY)" | tail -1)
   k -n storefront delete pod "np-$name" --ignore-not-found --wait=false >/dev/null 2>&1
@@ -50,15 +60,15 @@ bad=[x for x in t if x['health']!='up']
 for x in t: print(f\"{'ok' if x['health']=='up' else 'UNEXPECTED':10} {x['scrapePool']:45} {x['labels'].get('pod','')[:32]:32} {x['health']} {x['lastError'][:60]}\")
 sys.exit(1 if bad or not t else 0)" || fails=$((fails+1))
 
-echo "== through the Gateway (from this machine, host port 80)"
+echo "== through the Gateway (from this machine, port 80)"
 gw() {
   local code mark=ok
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$1")
   [ "$code" != "$2" ] && { mark=UNEXPECTED; fails=$((fails+1)); }
   printf '%-10s %-50s expect %s got %s\n' "$mark" "$1" "$2" "$code"
 }
-gw http://storefront.localhost/products 200
-gw http://storefront.localhost/actuator/prometheus 404
+gw "$GW/products" 200
+gw "$GW/actuator/prometheus" 404
 
 echo "== CloudNativePG"
 k -n storefront get cluster storefront-db -o jsonpath='phase={.status.phase} ready={.status.readyInstances}/{.status.instances}{"\n"}'

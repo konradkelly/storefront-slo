@@ -473,7 +473,8 @@ the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
       Decided: Traefik and k3s's metrics-server are disabled. Envoy Gateway and the metrics-server chart come from
       the same `scripts/lib/platform.sh` as kind (ingress-nginx was retired in March 2026). ServiceLB and
       local-path stay. Nodes get zone labels from user_data: the API's zone spread uses `DoNotSchedule`, so without
-      them no API pod would schedule. NetworkPolicy re-test still to do.
+      them no API pod would schedule. NetworkPolicy re-tested 2026-10-29 (`scripts/netpol-check.sh k3s`): same
+      results as on kind once a pod runs, but kube-router leaves a new pod's egress open for its first 0.3-0.9 s.
 - [ ] **Database.** Run CloudNativePG on local-path storage, with backups to S3 through the operator's
       barman integration. Data on a node's disk is the weak point here, and fixing it is part of Phase 4b.
       Built with the **Barman Cloud plugin** (+ cert-manager), not the in-tree `barmanObjectStore`, which is
@@ -513,6 +514,10 @@ the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
 **Experiment:** Stop the k3s server instance while k6 runs. Workloads keep serving, but nothing can be scheduled,
 scaled, or rolled out. Measure the budget spent, then compare it with killing an agent node.
 Losing a single control-plane node is the strongest argument for Phase 4b.
+Done 2026-10-29, with a backup restore drill (58 s, data identical at the restore point). Stopping the server was a
+total outage, not only lost scheduling: it also ran the Postgres primary, CoreDNS and Alertmanager. Stopping an
+agent overloaded the server once its pods were evicted. Neither paged, because the checkout SLI recorded no
+failures. See [docs/k3s.md](k3s.md#experiment-stop-the-control-plane-then-an-agent) and the two postmortems.
 
 ---
 

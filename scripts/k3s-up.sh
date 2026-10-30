@@ -88,8 +88,8 @@ creds=$(mktemp)
   echo "AWS_REGION=$region"
 } > "$creds")
 k -n storefront create secret generic storefront-backup-s3 --from-env-file="$creds" --dry-run=client -o yaml | k apply -f -
-k -n monitoring create secret generic grafana-snapshots-s3 --from-env-file="$creds" \
-  --from-literal=BUCKET="$(tf output -raw backup_bucket)" --dry-run=client -o yaml | k apply -f -
+echo "BUCKET=$(tf output -raw backup_bucket)" >> "$creds" # kubectl 1.36 refuses --from-env-file with --from-literal
+k -n monitoring create secret generic grafana-snapshots-s3 --from-env-file="$creds" --dry-run=client -o yaml | k apply -f -
 rm -f "$creds"
 k apply -f k8s/monitoring/grafana-snapshots.yaml
 
