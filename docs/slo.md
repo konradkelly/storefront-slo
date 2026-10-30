@@ -153,7 +153,14 @@ regressions.
 - **Server-side measurement only.** These SLIs come from the app's own metrics. If the app is down, or a
   request never reaches it, nothing is recorded and the ratios go quiet instead of red.
   `StorefrontApiDown` covers the case where Prometheus can't scrape the app at all. It doesn't catch failures in
-  front of the app (ingress, DNS). That needs a probe from outside, such as blackbox_exporter.
+  front of the app (ingress, DNS). The k3s control-plane stop (2026-10-29) showed a third case: requests that
+  reach the app but hang. Every request waited 30 s for a database connection, the load generator slowed down to
+  match, and the SLIs recorded about 1% of a 12-minute outage. Three changes followed:
+  - The database connection timeout is 5 s, so a request in an outage fails fast and gets counted.
+  - `StorefrontProbeFailing` counts time instead of requests. blackbox_exporter fetches a product through the
+    Gateway every 15 s (kind and k3s). It runs inside the cluster, so it still can't see the way in from outside.
+  - `StorefrontCheckoutTrafficStopped` fires when shoppers still arrive but nobody reaches checkout. With no
+    attempts, the checkout SLI has nothing to divide.
 - **Changing an SLI's inputs corrupts its long windows.** When the 0.5s bucket was added, checkouts
   recorded before it existed still counted as valid but could never count as good. The 28d window read
   98% slow until that data aged out, and old 2% payment failures kept the availability budget negative

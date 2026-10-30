@@ -189,3 +189,43 @@ groups:
           summary: "No storefront-api instance is being scraped successfully"
           description: "Prometheus can't scrape any storefront-api target. The SLO alerts can't see an outage like this."
           runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontApiDown.md"
+      # The SLIs above count the requests the app answers. When requests hang, or never reach the app, they record
+      # little or nothing: 1% of the failures in the k3s control-plane stop (docs/postmortems/). This counts time
+      # instead. blackbox-exporter fetches a product through the Gateway every 15 s (k8s/monitoring/storefront-probe.yaml),
+      # whether or not anyone else is sending traffic. Pages when most probes in 3 minutes failed. Only kind and
+      # k3s run the probe. In Compose there's no probe_success, and this never fires.
+      - alert: StorefrontProbeFailing
+        expr: avg_over_time(probe_success{job="storefront-probe"}[3m]) < 0.5
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Synthetic requests through the Gateway are failing"
+          description: "{{ $value | humanizePercentage }} of probes succeeded in the last 3 minutes."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontProbeFailing.md"
+      # Checkout is the last step of a shopping session. When the steps before it fail, nobody gets that far, the
+      # checkout SLI has no attempts to divide by, and it stays quiet instead of red (k3s control-plane stop). This
+      # fires when checkout attempts stop while shoppers still arrive:
+      #   - no POST /orders in 5 minutes,
+      #   - over 100 in the hour before, so 5 quiet minutes are a surprise (8 or more expected), not a quiet evening,
+      #   - GET /products in the last 2 minutes: shoppers still start sessions. When all traffic stops (a load test
+      #     ends, or nothing gets in at all) it stays quiet; StorefrontProbeFailing covers an empty front door. The
+      #     probe fetches /products/{id}, so it doesn't count as a shopper.
+      # "The hour before" stands in for "normal for this time of day". Production would compare with the same time
+      # last week, which a lab rebuilt every day never has. Because of that, the alert clears after an hour without
+      # checkouts, whether or not they're back.
+      - alert: StorefrontCheckoutTrafficStopped
+        expr: |
+          (sum(increase(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST"}[5m])) or vector(0)) == 0
+          and
+          sum(increase(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST"}[1h] offset 5m)) > 100
+          and
+          sum(rate(http_server_requests_seconds_count{application="storefront-api", uri="/products", method="GET"}[2m])) > 0
+        for: 2m
+        labels:
+          severity: page
+          slo: checkout-availability
+        annotations:
+          summary: "Shoppers are arriving, but nobody has reached checkout for 5 minutes"
+          description: "No POST /orders for 5 minutes, after more than 100 in the hour before. The checkout SLO can't see this: with no attempts, it has nothing to burn."
+          runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutTrafficStopped.md"

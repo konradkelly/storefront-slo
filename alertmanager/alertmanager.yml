@@ -57,9 +57,10 @@ inhibit_rules:
   - source_matchers: [severity="page"]
     target_matchers: [severity="ticket"]
     equal: [alertname, slo]
-  # If the app is down, every SLO burn alert is a symptom of that. Show the cause, not the symptoms.
+  # If the app is down, every SLO burn alert, a failing probe and stopped checkouts are symptoms of that. Show the
+  # cause, not the symptoms.
   - source_matchers: [alertname="StorefrontApiDown"]
-    target_matchers: [alertname=~"Storefront.*BudgetBurn"]
+    target_matchers: [alertname=~"Storefront.*BudgetBurn|StorefrontProbeFailing|StorefrontCheckoutTrafficStopped"]
 
 receivers:
   - name: page

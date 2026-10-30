@@ -9,6 +9,13 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/storefront}
     username: ${DB_USER:storefront}
     password: ${DB_PASSWORD:storefront}
+    hikari:
+      # How long a request waits for a pooled connection before it fails with a 500 (ms). The default, 30 s, made
+      # the k3s control-plane outage invisible (docs/postmortems/2026-10-29-k3s-control-plane-stop.md): every request
+      # hung for half a minute, clients slowed down to match, and the SLIs recorded about 1% of the failures. A user
+      # gives up long before 30 s anyway. The cost: during a CloudNativePG failover (about 20 s of queueing in the
+      # Phase 2.1 experiment) requests now fail after 5 s instead of waiting it out.
+      connection-timeout: 5000
   jpa:
     hibernate:
       # Flyway owns the schema (src/main/resources/db/migration). Hibernate only checks that the entities match it,

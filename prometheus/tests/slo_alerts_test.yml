@@ -225,3 +225,95 @@ tests:
               summary: "No storefront-api instance is being scraped successfully"
               description: "Prometheus can't scrape any storefront-api target. The SLO alerts can't see an outage like this."
               runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontApiDown.md"
+
+  # The database goes away (k3s control-plane stop): shoppers keep opening the catalog and get 500s, so nobody
+  # reaches checkout. 10 checkouts/min until minute 70, none for 20 minutes, then back.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+10x70 700+0x19 710+10x10'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products", method="GET", status="200"}'
+        values: '0+100x70 7000+0x19 7100+100x10'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products", method="GET", status="500"}'
+        values: '0+0x70 5+5x19 100+0x10'
+    alert_rule_test:
+      # From minute 74 the last 5 minutes hold no checkout. Pending for 2 minutes first.
+      - eval_time: 75m
+        alertname: StorefrontCheckoutTrafficStopped
+        exp_alerts: []
+      - eval_time: 77m
+        alertname: StorefrontCheckoutTrafficStopped
+        exp_alerts:
+          - exp_labels: {severity: page, slo: checkout-availability}
+            exp_annotations:
+              summary: "Shoppers are arriving, but nobody has reached checkout for 5 minutes"
+              description: "No POST /orders for 5 minutes, after more than 100 in the hour before. The checkout SLO can't see this: with no attempts, it has nothing to burn."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontCheckoutTrafficStopped.md"
+      # Checkouts are back at minute 91.
+      - eval_time: 93m
+        alertname: StorefrontCheckoutTrafficStopped
+        exp_alerts: []
+
+  # A load test ends: checkouts and catalog requests stop together. Nobody is arriving, so it's not a broken shop.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+10x70 700+0x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products", method="GET", status="200"}'
+        values: '0+100x70 7000+0x30'
+      # The synthetic probe keeps fetching a product, but /products/{id} doesn't count as a shopper arriving.
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products/{id}", method="GET", status="200"}'
+        values: '0+4x100'
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: StorefrontCheckoutTrafficStopped
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: StorefrontCheckoutTrafficStopped
+        exp_alerts: []
+
+  # A quiet evening: 1 checkout/min. Five minutes without one happen by chance, so the hour before (60) is too
+  # little to page on.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status="201"}'
+        values: '0+1x70 70+0x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", uri="/products", method="GET", status="200"}'
+        values: '0+20x100'
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: StorefrontCheckoutTrafficStopped
+        exp_alerts: []
+
+  # Synthetic probe every 15 s. Healthy for 10 minutes, failing from 10m15s to 16m, healthy again.
+  - interval: 15s
+    input_series:
+      - series: 'probe_success{job="storefront-probe", instance="probe"}'
+        values: '1x40 0x23 1x20'
+    alert_rule_test:
+      # 12m: 8 of the last 12 probes failed. Pending for 2 minutes first.
+      - eval_time: 13m
+        alertname: StorefrontProbeFailing
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: StorefrontProbeFailing
+        exp_alerts:
+          - exp_labels: {severity: page, job: storefront-probe, instance: probe}
+            exp_annotations:
+              summary: "Synthetic requests through the Gateway are failing"
+              description: "0% of probes succeeded in the last 3 minutes."
+              runbook_url: "https://github.com/konradkelly/storefront-slo/blob/main/docs/runbooks/StorefrontProbeFailing.md"
+      # 18m: 8 of the last 12 succeeded.
+      - eval_time: 18m
+        alertname: StorefrontProbeFailing
+        exp_alerts: []
+
+  # One failed probe is a blip, not an outage.
+  - interval: 15s
+    input_series:
+      - series: 'probe_success{job="storefront-probe", instance="probe"}'
+        values: '1x40 0 1x40'
+    alert_rule_test:
+      - eval_time: 13m
+        alertname: StorefrontProbeFailing
+        exp_alerts: []

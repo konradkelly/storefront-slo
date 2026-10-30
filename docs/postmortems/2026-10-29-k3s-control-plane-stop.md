@@ -152,7 +152,7 @@ every 5 minutes at most (`archive_timeout`), so up to 5 minutes of orders could 
 | Keep workloads off the k3s server: taint it (`CriticalAddonsOnly=true:NoExecute`) and give system pods that must stay a toleration, or run three servers with embedded etcd. Phase 4b removes the issue | prevent | | |
 | CoreDNS: two replicas, spread across nodes | prevent | | |
 | Alertmanager: two replicas spread across zones, and route `Watchdog` to an external dead man's switch (Grafana Cloud or healthchecks.io) | detect | | |
-| Outside-in synthetic probe as an SLI, run from outside the cluster (Phase 5, moved earlier) | detect | | |
-| Alert when checkout attempts drop to zero or far below the previous hour (carried over from the fast-burn postmortem, now seen for real) | detect | | |
-| Shorten HikariCP `connectionTimeout` (30s default) to a few seconds, so a database outage fails fast and gets counted | detect | | |
+| Outside-in synthetic probe as an SLI, run from outside the cluster (Phase 5, moved earlier) | detect | | partly: a probe through the Gateway pages (`StorefrontProbeFailing`), but it runs inside the cluster and isn't an SLI yet |
+| Alert when checkout attempts drop to zero or far below the previous hour (carried over from the fast-burn postmortem, now seen for real) | detect | | done: `StorefrontCheckoutTrafficStopped` |
+| Shorten HikariCP `connectionTimeout` (30s default) to a few seconds, so a database outage fails fast and gets counted | detect | | done: 5 s. Measured locally: failing requests took 30 s, now 5 s |
 | Barman Cloud plugin: two replicas with a PDB. While it is down, CNPG doesn't fail over at all ([tested](2026-10-29-k3s-agent-stop.md#the-backup-plugin-blocks-failover-tested-afterwards)) | prevent | | |

@@ -1,0 +1,34 @@
+# blackbox-exporter (chart prometheus-blackbox-exporter, installed by scripts/lib/platform.sh). It runs the probes
+# that k8s/monitoring/storefront-probe.yaml asks for: Prometheus calls it with a target, it fetches that URL and
+# reports probe_success and timings.
+#
+# Two replicas on different nodes, so losing one node doesn't take the probe with it. Prometheus reaches them
+# through the Service.
+replicas: 2
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: prometheus-blackbox-exporter
+
+config:
+  modules:
+    storefront_product:
+      prober: http
+      timeout: 5s # same as the laptop probers (scripts/experiments/prober.py). A shopper gives up around here too
+      http:
+        method: GET
+        valid_status_codes: [200]
+        preferred_ip_protocol: ip4
+        headers:
+          # kind's route only matches this hostname. k3s's route has none, so it matches any host.
+          Host: storefront.localhost
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 64Mi

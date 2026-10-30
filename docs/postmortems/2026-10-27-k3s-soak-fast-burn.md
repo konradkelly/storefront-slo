@@ -117,6 +117,6 @@ its 60-minute timeout. This drill ran 13 hours before that low point. Fixed in `
 |--------|------|-------|----------|
 | Runbook: a ticket that arrives just after a page usually means the 3-day budget, not a new incident. Check the 3d window and recent incidents first | mitigate | | |
 | Make the ticket say which window pair fired (for example, two ticket rules with a `window` label), so a ticket after an incident reads as a 3-day budget alert | detect | | |
-| Alert when checkout traffic drops to zero: an empty SLO ratio can't burn budget, so no SLO alert notices | detect | | |
+| Alert when checkout traffic drops to zero: an empty SLO ratio can't burn budget, so no SLO alert notices | detect | | partly: `StorefrontCheckoutTrafficStopped` fires when shoppers arrive but stop reaching checkout. A load generator that dies still looks like a test that ended |
 | Stop k6 growing during long runs: summary and thresholds off, metrics pushed to Prometheus | prevent | | done in `cf74166` |
 | Add a fallback payment provider or a retry policy (carried over from Phase 1) | prevent | | |

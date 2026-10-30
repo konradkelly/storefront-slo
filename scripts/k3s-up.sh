@@ -78,6 +78,7 @@ install_gateway k8s/gateway/gateway-k3s.yaml
 # Same routes as kind. *.localhost only works on your own machine, so use sslip.io: <name>.<ip>.sslip.io resolves
 # to <ip> without any DNS setup.
 sed "s/\.localhost\]/.$server_ip.sslip.io]/" k8s/gateway/monitoring-routes.yaml | k apply -f -
+install_probe
 
 step "storefront namespace, backup credentials, hourly Grafana snapshots"
 k apply -f k8s/base/namespace.yaml # with its Pod Security labels; Argo CD adopts it

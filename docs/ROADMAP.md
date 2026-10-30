@@ -613,7 +613,9 @@ Pick items based on interest.
 - **Chaos engineering:** Replace the manual `set env` experiments with **Chaos Mesh** experiments (pod kill,
   network latency to Postgres, CPU stress) stored in git, and run a written game day.
 - **Synthetic probing:** blackbox-exporter probing through the ingress, as an outside-in availability SLI
-  to compare with the server-side one.
+  to compare with the server-side one. Started 2026-10-30, after the k3s node stops showed the SLIs recording 1% of
+  an outage: blackbox-exporter fetches a product through the Gateway every 15 s and `StorefrontProbeFailing` pages
+  on it (kind and k3s). Still to do: probe from outside the cluster, and make it an SLI.
 
 ---
 

@@ -12,6 +12,7 @@ KEDA_VERSION=2.21.0
 ENVOY_GATEWAY_VERSION=1.9.2 # Gateway API implementation; ingress-nginx was retired in March 2026
 CERT_MANAGER_VERSION=v1.21.2 # needed by the Barman Cloud plugin (its TLS certificates)
 BARMAN_PLUGIN_VERSION=0.8.1 # chart; plugin v0.15.1
+BLACKBOX_VERSION=11.20.2 # chart; blackbox-exporter v0.29.1
 
 k() { kubectl --context "$CTX" "$@"; }
 step() { echo; echo "== $*"; }
@@ -103,4 +104,13 @@ install_gateway() { # gateway manifest (k8s/gateway/gateway.yaml on kind)
     --kube-context "$CTX" --namespace envoy-gateway-system --create-namespace --wait --timeout 6m
   k apply -f "$1"
   k -n gateway wait --for=condition=Programmed gateway/storefront --timeout=600s
+}
+
+install_probe() {
+  step "blackbox-exporter $BLACKBOX_VERSION + the synthetic shopper (probes through the Gateway, so after it)"
+  helm_repo prometheus-community https://prometheus-community.github.io/helm-charts
+  helm upgrade --install blackbox prometheus-community/prometheus-blackbox-exporter \
+    --kube-context "$CTX" --namespace monitoring --version "$BLACKBOX_VERSION" \
+    -f k8s/monitoring/blackbox-values.yaml --wait --timeout 5m
+  k apply -f k8s/monitoring/storefront-probe.yaml
 }

@@ -31,6 +31,7 @@ install_metrics_server
 install_keda
 install_gateway k8s/gateway/gateway.yaml
 k apply -f k8s/gateway/monitoring-routes.yaml
+install_probe
 
 step "storefront-api image"
 docker build -q -t storefront-api:dev ./app

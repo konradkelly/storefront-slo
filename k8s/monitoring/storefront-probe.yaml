@@ -1,0 +1,29 @@
+# The synthetic shopper. Every 15 s, blackbox-exporter (k8s/monitoring/blackbox-values.yaml) fetches one product
+# through the cluster Gateway: Envoy, the HTTPRoute, the API and Postgres, the same path a customer's request takes
+# once it is inside the cluster. probe_success is recorded whether or not anyone else is sending traffic, so an
+# outage shows up as time, not only as the requests that happened to be counted. StorefrontProbeFailing
+# (prometheus/rules/slo-alerts.yml) pages on it. Applied by scripts/lib/platform.sh (install_probe).
+#
+# What it doesn't cover: the way in from outside the cluster. On k3s that's the Elastic IP and the server's
+# ServiceLB, which the probe skips by calling the Envoy Service directly. Only a probe outside the cluster sees those.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: storefront
+  namespace: monitoring
+  labels:
+    release: kps # what kube-prometheus-stack's Prometheus selects on
+spec:
+  jobName: storefront-probe
+  interval: 15s
+  scrapeTimeout: 10s
+  module: storefront_product
+  prober:
+    url: blackbox-prometheus-blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      static:
+        # Envoy Gateway names the Gateway's Service envoy-<namespace>-<name>-<first 8 hex of sha256("<namespace>/<name>")>,
+        # so it's the same on every cluster. A product, not the list: StorefrontCheckoutTrafficStopped counts
+        # GET /products as a shopper arriving, and the probe isn't one.
+        - http://envoy-gateway-storefront-92f58a48.envoy-gateway-system.svc/products/1
