@@ -10,6 +10,7 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: {{ $c.wave | quote }}
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
 spec:
   project: platform
   destination:

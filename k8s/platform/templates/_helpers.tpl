@@ -6,7 +6,9 @@ automated:
 syncOptions:
   - CreateNamespace=true
   # Large CRDs (kube-prometheus-stack's, Gateway API's) and the dashboard ConfigMap overflow the 256 KiB
-  # last-applied annotation that client-side apply keeps.
+  # last-applied annotation that client-side apply keeps. Each platform Application also compares server-side
+  # (compare-options: ServerSideDiff=true): without a last-applied annotation, a client-side diff counts every
+  # default the API server fills in as drift (the monitoring HTTPRoutes' backendRef kind, group and weight).
   - ServerSideApply=true
 # A webhook that isn't serving yet (a fresh operator's), or an API server too busy to answer (a new kind cluster pulling
 # every image at once: "etcdserver: request timed out"), fails an attempt. Keep trying every few minutes instead of
