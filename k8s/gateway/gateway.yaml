@@ -1,5 +1,5 @@
 # The cluster's front door on kind: Gateway API, implemented by Envoy Gateway (chart 1.9.2, installed by
-# scripts/kind-up.sh). ingress-nginx, the roadmap's first choice, was retired in March 2026 (no further security
+# Argo CD from k8s/platform). ingress-nginx, the roadmap's first choice, was retired in March 2026 (no further security
 # fixes), and the Kubernetes project points to Gateway API as the replacement.
 #
 # Getting traffic in on kind: there's no cloud load balancer, but k8s/kind-config.yaml maps the host's ports 80/443

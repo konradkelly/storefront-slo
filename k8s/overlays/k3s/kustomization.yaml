@@ -1,11 +1,11 @@
-# k3s on EC2 (Phase 4a, terraform/aws/k3s). Argo CD syncs this overlay (k8s/argocd/storefront-k3s.yaml).
+# k3s on EC2 (Phase 4a, terraform/aws/k3s). Argo CD syncs this overlay (k8s/platform/values-k3s.yaml).
 # Differences from kind, each one a thing a managed cluster would handle differently (see docs/k3s.md):
 #   - the image comes from GHCR; the release workflow writes the signed digest here
 #   - Postgres archives WAL and takes daily base backups to S3 (backups.yaml), because local-path volumes die with
 #     their node
 #   - no synchronous_commit override: that was a workaround for Docker Desktop's disk (overlays/kind)
 #   - the app route has no hostname, so http://<server IP>/products matches. The monitoring UIs have hostnames
-#     (scripts/k3s-up.sh), and a route with a hostname wins over this one for its host.
+#     (k8s/platform/templates/cluster-config.yaml), and a route with a hostname wins over this one for its host.
 #
 # Postgres reaching S3 needs no NetworkPolicy change: base/networkpolicy.yaml already lets the database pods
 # reach any address on 443 (for the Kubernetes API), and S3 is HTTPS.
@@ -17,7 +17,7 @@ resources:
   - backups.yaml
 
 patches:
-  # Ship WAL through the Barman Cloud plugin (installed by scripts/k3s-up.sh) to the ObjectStore in backups.yaml.
+  # Ship WAL through the Barman Cloud plugin (installed by Argo CD, k8s/platform/values-k3s.yaml) to the ObjectStore in backups.yaml.
   - target:
       kind: Cluster
       name: storefront-db

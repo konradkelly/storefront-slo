@@ -7,7 +7,7 @@ us-east-1, with the same platform, SLO rules, dashboards and Argo CD delivery as
 terraform/aws/bootstrap   once: state bucket, budget alert, GitHub OIDC role   (~$0/month, kept)
 terraform/aws/k3s         make up / make down: VPC, nodes, IAM, backup bucket   (~$0.15/hr while up)
 k8s/overlays/k3s          what Argo CD deploys: base + S3 backups + GHCR image
-scripts/k3s-up.sh         terraform apply → kubeconfig → platform → Argo CD
+scripts/k3s-up.sh         terraform apply → kubeconfig → Secrets → Argo CD, which installs the rest (k8s/platform)
 ```
 
 ## First time
@@ -20,10 +20,9 @@ scripts/k3s-up.sh         terraform apply → kubeconfig → platform → Argo C
    gh variable set AWS_K3S_ROLE_ARN --body "$(terraform output -raw github_role_arn)"
    ```
    The budget covers the **whole account**, not only this project.
-2. **A published image.** Argo CD deploys the digest that Release writes into `k8s/overlays/k3s`. Until the first
-   release (blocked by the vulnerability gate, see [delivery.md](delivery.md)), `make up` builds everything except
-   the storefront app itself, and argocd-up.sh says so.
-3. **Push** `k8s/overlays/k3s` to main: Argo CD reads GitHub, not your working tree.
+2. **A published image.** Argo CD deploys the digest that Release writes into `k8s/overlays/k3s`.
+3. **Push** to main: Argo CD reads GitHub, not your working tree. That covers the platform too
+   ([k8s/platform](../k8s/platform), `values-k3s.yaml`), not only the app.
 
 ## Daily use
 
@@ -65,7 +64,7 @@ In-cluster Prometheus stores to an `emptyDir`, so `make down` deletes every metr
 `k8s/monitoring/secrets/grafana-cloud.env` present (setup: [k8s/monitoring/secrets/README.md](../k8s/monitoring/secrets/README.md)),
 `make up` also copies a curated subset to Grafana Cloud's free tier: the SLO results, request and payment
 latency, checkouts, pool usage, restarts, node memory/disk/CPU, and Postgres archiving
-([kps-remote-write.yaml](../k8s/monitoring/kps-remote-write.yaml)). Those series outlive the cluster (14 days on
+([kps-remote-write.yaml](../k8s/platform/files/kps-remote-write.yaml)). Those series outlive the cluster (14 days on
 the free tier), are labeled `cluster="k3s-aws"`, and the committed dashboards import directly. Screenshot or
 link them in write-ups before they age out.
 

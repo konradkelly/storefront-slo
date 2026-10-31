@@ -1,4 +1,4 @@
-# Node alerts for clusters where we own the machines (k3s on EC2). Applied by scripts/k3s-up.sh; not on kind, whose
+# Node alerts for clusters where we own the machines (k3s on EC2). In k8s/cluster/k3s; not on kind, whose
 # "nodes" are containers sharing the laptop's disk and memory.
 #
 # kube-prometheus-stack already has node-exporter alerts, but they're mostly severity=warning, which

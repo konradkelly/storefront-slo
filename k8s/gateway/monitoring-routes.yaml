@@ -1,6 +1,6 @@
 # The monitoring UIs through the Gateway instead of port-forwards. *.localhost resolves to 127.0.0.1 in browsers and
-# curl, so no hosts-file entries are needed on kind. On k3s, scripts/k3s-up.sh rewrites the hostnames to
-# <name>.<server IP>.sslip.io. These UIs have no login in front of them (Grafana has admin/admin): fine on a laptop,
+# curl, so no hosts-file entries are needed on kind. On k3s, the cluster-config Application rewrites the
+# hostnames to <name>.<server IP>.sslip.io (k8s/platform/templates/cluster-config.yaml). These UIs have no login in front of them (Grafana has admin/admin): fine on a laptop,
 # and on k3s only because the security group admits nothing but your own IP. Never on a shared cluster.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

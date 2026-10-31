@@ -1,7 +1,8 @@
 # Copies a curated subset of metrics to Grafana Cloud, so the data outlives `make down` (in-cluster Prometheus
-# uses an emptyDir and starts empty on every `make up`). Added by scripts/k3s-up.sh only when
-# k8s/monitoring/secrets/grafana-cloud.env exists. It replaces GRAFANA_CLOUD_PROM_URL, and the credentials come
-# from the grafana-cloud Secret it creates.
+# uses an emptyDir and starts empty on every `make up`). On k3s only, and only when
+# k8s/monitoring/secrets/grafana-cloud.env exists: scripts/k3s-up.sh then creates the grafana-cloud Secret and passes
+# the push URL to Argo CD, and k8s/platform/templates/charts.yaml adds this file to kube-prometheus-stack's values
+# with GRAFANA_CLOUD_PROM_URL replaced.
 #
 # The free tier allows 10k active series, and the whole kube-prometheus-stack produces several times that. So
 # send only what the dashboards (grafana/dashboards/), the SLOs and the node alerts read. The SLO recording rules

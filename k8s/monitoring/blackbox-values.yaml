@@ -1,4 +1,4 @@
-# blackbox-exporter (chart prometheus-blackbox-exporter, installed by scripts/lib/platform.sh). It runs the probes
+# blackbox-exporter (chart prometheus-blackbox-exporter, installed by Argo CD from k8s/platform). It runs the probes
 # that k8s/monitoring/storefront-probe.yaml asks for: Prometheus calls it with a target, it fetches that URL and
 # reports probe_success and timings.
 #

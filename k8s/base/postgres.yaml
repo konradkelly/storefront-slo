@@ -1,4 +1,4 @@
-# Postgres, run by the CloudNativePG operator (installed by scripts/kind-up.sh, values in k8s/monitoring/cnpg-values.yaml).
+# Postgres, run by the CloudNativePG operator (installed by Argo CD from k8s/platform, values in k8s/monitoring/cnpg-values.yaml).
 #
 # The operator turns this one resource into a primary plus a streaming-replication standby, each with its own
 # PersistentVolumeClaim, and fails over to the standby if the primary is lost. It also creates:

@@ -4,7 +4,7 @@ Only this README is committed.
 
 ## grafana-cloud.env
 
-Lets the k3s cluster's Prometheus copy its key metrics to Grafana Cloud (`k8s/monitoring/kps-remote-write.yaml`),
+Lets the k3s cluster's Prometheus copy its key metrics to Grafana Cloud (`k8s/platform/files/kps-remote-write.yaml`),
 so they survive `make down`. Without this file, `make up` still works and the metrics stay in the cluster.
 
 1. Create a free Grafana Cloud account and stack.

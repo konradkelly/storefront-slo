@@ -1,6 +1,6 @@
 # Local stand-in for Slack, same as the Compose service: prints one line per alert Alertmanager sends.
 #   kubectl -n monitoring logs -f deploy/alert-logger
-# The script comes from alertmanager/webhook-logger.py via the alert-logger-script ConfigMap (scripts/kind-up.sh).
+# The script comes from alertmanager/webhook-logger.py via the alert-logger-script ConfigMap (k8s/cluster/monitoring).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

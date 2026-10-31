@@ -6,13 +6,13 @@ SHELL := bash
 .PHONY: help up down plan keep unkeep kind-up argocd-kind
 
 help:
-	@echo "make up            k3s on EC2 (Phase 4a): terraform apply + platform + Argo CD. Costs ~\$$0.15/hr."
+	@echo "make up            k3s on EC2 (Phase 4a): terraform apply, then Argo CD installs the rest. Costs ~\$$0.15/hr."
 	@echo "make down          destroy the k3s environment (back to \$$0/day)"
 	@echo "make plan          terraform plan for the k3s environment, no changes"
 	@echo "make keep HOURS=72 skip the nightly destroy until then (a soak run; max 7 days)"
 	@echo "make unkeep        nightly destroy applies again"
-	@echo "make kind-up       local kind lab"
-	@echo "make argocd-kind   Argo CD on the kind lab"
+	@echo "make kind-up       local kind lab (Argo CD installs everything from GitHub main; REVISION=<branch> to change)"
+	@echo "make argocd-kind   rerun only the Argo CD step on the kind lab"
 
 up:
 	bash scripts/k3s-up.sh

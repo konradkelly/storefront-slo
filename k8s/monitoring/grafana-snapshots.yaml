@@ -1,4 +1,4 @@
-# k3s only, applied by scripts/k3s-up.sh. Every hour, renders the SLO and API dashboards through Grafana's image
+# k3s only (k8s/cluster/k3s). Every hour, renders the SLO and API dashboards through Grafana's image
 # renderer (kps-values-k3s.yaml) and copies the PNGs to the backup bucket under grafana-snapshots/. Pictures of a
 # soak run outlive the cluster: scripts/k3s-down.sh downloads them to grafana-snapshots/, and the nightly destroy
 # saves them as a workflow artifact, before the bucket is deleted.
@@ -89,7 +89,7 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
-              # The backup bucket's access key (terraform/aws/k3s/backups.tf), copied here by scripts/k3s-up.sh.
+              # The backup bucket's access key (terraform/aws/k3s/backups.tf), copied into a Secret by scripts/k3s-up.sh.
               env:
                 - name: HOME
                   value: /tmp

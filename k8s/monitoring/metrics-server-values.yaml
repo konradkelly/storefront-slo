@@ -1,4 +1,4 @@
-# metrics-server values (chart 3.14.0, app 0.9.0). Installed by scripts/lib/platform.sh (kind and k3s) into kube-system.
+# metrics-server values (chart 3.14.0, app 0.9.0). Argo CD installs it into kube-system (k8s/platform).
 # It feeds pod CPU/memory to the resource metrics API, which `kubectl top` and CPU-based autoscaling read.
 args:
   # kind's and k3s's kubelets serve self-signed certificates. Lab only: a real cluster has kubelet certs signed by the
