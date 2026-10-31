@@ -2,6 +2,8 @@
 # curl, so no hosts-file entries are needed on kind. On k3s, scripts/k3s-up.sh rewrites the hostnames to
 # <name>.<server IP>.sslip.io. These UIs have no login in front of them (Grafana has admin/admin): fine on a laptop,
 # and on k3s only because the security group admits nothing but your own IP. Never on a shared cluster.
+# Each rule spells out matches, though PathPrefix / is the default: the API server fills in a missing one, and Argo CD
+# then shows the route as OutOfSync forever (seen on the first app-of-apps sync, 2026-10-31).
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -11,7 +13,8 @@ spec:
   parentRefs: [{ name: storefront, namespace: gateway }]
   hostnames: [grafana.localhost]
   rules:
-    - backendRefs: [{ name: kps-grafana, port: 80 }]
+    - matches: [{ path: { type: PathPrefix, value: / } }]
+      backendRefs: [{ name: kps-grafana, port: 80 }]
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -22,7 +25,8 @@ spec:
   parentRefs: [{ name: storefront, namespace: gateway }]
   hostnames: [prometheus.localhost]
   rules:
-    - backendRefs: [{ name: kps-kube-prometheus-stack-prometheus, port: 9090 }]
+    - matches: [{ path: { type: PathPrefix, value: / } }]
+      backendRefs: [{ name: kps-kube-prometheus-stack-prometheus, port: 9090 }]
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -33,4 +37,5 @@ spec:
   parentRefs: [{ name: storefront, namespace: gateway }]
   hostnames: [alertmanager.localhost]
   rules:
-    - backendRefs: [{ name: kps-kube-prometheus-stack-alertmanager, port: 9093 }]
+    - matches: [{ path: { type: PathPrefix, value: / } }]
+      backendRefs: [{ name: kps-kube-prometheus-stack-alertmanager, port: 9093 }]
