@@ -15,9 +15,15 @@
 #   few minutes, and took Jobs, rollouts and garbage collection down with them.
 # - The node image is pinned, the same as CI (.github/workflows/ci.yml) and k3s's minor version. Unpinned, kind
 #   v0.33 created 1.37 nodes on the next rebuild.
+# - containerd looks for registry mirrors in /etc/containerd/certs.d, where scripts/kind-up.sh points each registry at a
+#   pull-through cache on the host (scripts/lib/bootstrap.sh). The node image's containerd uses the v2 config format.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: storefront
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
 networking:
   disableDefaultCNI: true
   podSubnet: 192.168.0.0/16 # Calico's default IP pool

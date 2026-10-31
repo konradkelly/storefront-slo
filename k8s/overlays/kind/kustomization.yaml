@@ -20,6 +20,19 @@ patches:
       - op: add
         path: /spec/hostnames
         value: [storefront.localhost]
+  # Scale on request rate only, without the CPU backstop (base/autoscaling.yaml). kind's nodes share the laptop's cores,
+  # so a pod's CPU mostly measures its neighbours and its own JVM warm-up. On a rebuild (2026-10-31) the API pods
+  # crash-looped until the database was up, each restart a cold JVM, and the CPU trigger took the Deployment to its
+  # maximum of 6 while the laptop was already at 100%, which slowed the rebuild further.
+  - target:
+      kind: ScaledObject
+      name: storefront-api
+    patch: |-
+      - op: test
+        path: /spec/triggers/1/type
+        value: cpu
+      - op: remove
+        path: /spec/triggers/1
   # Lab only, like etcd's --unsafe-no-fsync in k8s/kind-config.yaml. Docker Desktop's WSL virtual disk occasionally
   # stalls a WAL flush for seconds, and every transaction waits behind it (and behind the row locks held while it
   # waits). Measured 2026-10-05 with checkout-stress at 10 VUs: with the default, checkout p95 was 2.06s, p99 5.3s,

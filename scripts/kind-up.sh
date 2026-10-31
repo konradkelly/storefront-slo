@@ -13,7 +13,10 @@ cd "$(dirname "$0")/.."
 
 CTX=kind-storefront
 CALICO_VERSION=v3.32.2
-source scripts/lib/bootstrap.sh # k(), step(), the Secrets
+source scripts/lib/bootstrap.sh # k(), step(), the Secrets, the image caches
+
+step "image caches (a rebuild pulls from local disk)"
+start_image_caches
 
 step "cluster"
 if kind get clusters 2>/dev/null | grep -qx storefront; then
@@ -21,6 +24,7 @@ if kind get clusters 2>/dev/null | grep -qx storefront; then
 else
   kind create cluster --config k8s/kind-config.yaml
 fi
+use_image_caches storefront
 
 step "Calico $CALICO_VERSION (kind's default CNI is disabled because it doesn't enforce NetworkPolicy)"
 if ! k -n kube-system get ds calico-node >/dev/null 2>&1; then
