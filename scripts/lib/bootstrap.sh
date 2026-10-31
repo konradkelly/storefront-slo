@@ -54,9 +54,10 @@ use_image_caches() { # cluster name
     registry=${entry%%=*} upstream=${entry#*=} name=kind-cache-${registry//./-}
     docker network connect kind "$name" >/dev/null 2>&1 || true # already connected is fine
     for node in $(kind get nodes --name "$1"); do
-      docker exec "$node" mkdir -p "/etc/containerd/certs.d/$registry"
+      # MSYS_NO_PATHCONV: Git Bash would turn /etc/... into C:/Program Files/Git/etc/..., inside the node too.
+      MSYS_NO_PATHCONV=1 docker exec "$node" mkdir -p "/etc/containerd/certs.d/$registry"
       printf 'server = "%s"\n\n[host."http://%s:5000"]\n  capabilities = ["pull", "resolve"]\n' "$upstream" "$name" |
-        docker exec -i "$node" cp /dev/stdin "/etc/containerd/certs.d/$registry/hosts.toml"
+        MSYS_NO_PATHCONV=1 docker exec -i "$node" cp /dev/stdin "/etc/containerd/certs.d/$registry/hosts.toml"
     done
   done
 }
