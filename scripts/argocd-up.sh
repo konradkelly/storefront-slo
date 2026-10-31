@@ -23,9 +23,9 @@ k create namespace argocd --dry-run=client -o yaml | k apply -f -
 k apply --server-side -n argocd \
   -f "https://raw.githubusercontent.com/argoproj/argo-cd/$version/manifests/install.yaml"
 k -n argocd patch configmap argocd-cm --type merge --patch-file k8s/argocd/argocd-cm.yaml
-k -n argocd rollout status deployment/argocd-server --timeout=300s
-k -n argocd rollout status deployment/argocd-repo-server --timeout=300s
-k -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
+k -n argocd rollout status deployment/argocd-server --timeout=600s
+k -n argocd rollout status deployment/argocd-repo-server --timeout=600s
+k -n argocd rollout status statefulset/argocd-application-controller --timeout=600s
 
 # The root app is the one thing not in git: it says which cluster this is and carries the per-run values.
 cat <<EOF | k apply -f -
@@ -65,13 +65,13 @@ spec:
         - /spec/source/kustomize
 EOF
 
-echo "Argo CD is syncing k8s/platform from $revision. On a new cluster that takes 10-15 minutes."
+echo "Argo CD is syncing k8s/platform from $revision. On a new cluster that takes 10-30 minutes, mostly pulling images."
 apps() { k -n argocd get applications --no-headers \
   -o custom-columns=APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status 2>/dev/null; }
-for i in $(seq 120); do
+for i in $(seq 180); do # 30 minutes: a new cluster pulls every image, ~4 GB in all
   [ "$(k -n argocd get application platform -o jsonpath='{.status.sync.status}/{.status.health.status}')" = Synced/Healthy ] &&
     { apps; echo "Every app is Synced and Healthy."; break; }
-  [ "$i" = 120 ] && { echo "Not done after 20 minutes. Still waiting:"; apps | grep -v 'Synced *Healthy'; exit 1; }
+  [ "$i" = 180 ] && { echo "Not done after 30 minutes. Still waiting:"; apps | grep -v 'Synced *Healthy'; exit 1; }
   ((i % 6 == 0)) && { echo "--- $(date +%T) waiting for:"; apps | grep -v 'Synced *Healthy' || true; }
   sleep 10
 done

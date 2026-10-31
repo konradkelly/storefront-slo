@@ -26,7 +26,7 @@ step "Calico $CALICO_VERSION (kind's default CNI is disabled because it doesn't 
 if ! k -n kube-system get ds calico-node >/dev/null 2>&1; then
   k create -f "https://raw.githubusercontent.com/projectcalico/calico/$CALICO_VERSION/manifests/calico.yaml" >/dev/null
 fi
-k -n kube-system rollout status ds/calico-node --timeout=300s
+k -n kube-system rollout status ds/calico-node --timeout=600s # a new cluster pulls ~250 MB of images per node
 k wait --for=condition=Ready nodes --all --timeout=300s
 
 step "Secrets (the only cluster state that isn't in git)"

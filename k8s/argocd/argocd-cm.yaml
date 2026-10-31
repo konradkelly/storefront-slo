@@ -1,20 +1,29 @@
 # Merged into Argo CD's argocd-cm by scripts/argocd-up.sh (kubectl patch --type merge), on top of the upstream install.
 data:
   # App-of-apps sync waves only wait for a child Application if Argo CD can tell whether it's healthy. Argo CD stopped
-  # assessing Application health in 1.8; this is the check its docs give to restore it
-  # (operator-manual/health, "Argo CD App"). Without it, wave 0 (the storefront) would start before CloudNativePG
-  # is serving its webhook.
+  # assessing Application health in 1.8, and its docs (operator-manual/health, "Argo CD App") give a check that
+  # passes the child's health through. That isn't enough: a wave only waits while something is Progressing, and a
+  # child that hasn't synced yet is Missing, one whose first attempt failed is Degraded. On a new kind cluster the
+  # Envoy Gateway CRDs timed out on the first try (etcd overloaded), the root moved on, and cluster-config failed
+  # with "EnvoyProxy not found". So a child counts as Progressing until it has synced and stopped retrying.
   resource.customizations.health.argoproj.io_Application: |
-    hs = {}
-    hs.status = "Progressing"
-    hs.message = ""
-    if obj.status ~= nil then
-      if obj.status.health ~= nil then
-        hs.status = obj.status.health.status
-        if obj.status.health.message ~= nil then
-          hs.message = obj.status.health.message
-        end
+    hs = {status = "Progressing", message = ""}
+    if obj.status == nil then
+      return hs
+    end
+    if obj.status.operationState ~= nil and obj.status.operationState.phase == "Running" then
+      hs.message = "sync in progress"
+      return hs
+    end
+    if obj.status.health ~= nil then
+      hs.status = obj.status.health.status
+      if obj.status.health.message ~= nil then
+        hs.message = obj.status.health.message
       end
+    end
+    if hs.status == "Missing" then
+      hs.status = "Progressing"
+      hs.message = "not synced yet"
     end
     return hs
   # k8s/cluster/* build the Alertmanager config, dashboards and logger script from files that Docker Compose also
