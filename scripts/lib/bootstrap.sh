@@ -30,8 +30,9 @@ create_slack_secret() {
 # outside the cluster, so `kind delete cluster` keeps them; each stores its images in a named volume. Remove them
 # with: docker rm -f $(docker ps -aq -f name=kind-cache-) && docker volume rm $(docker volume ls -q -f name=kind-cache-)
 # Cached images are kept for 30 days after their last pull.
+# public.ecr.aws (Argo CD's Redis) isn't cached: the proxy can't get an anonymous token there ("unauthorized").
 REGISTRY_CACHE_IMAGE=registry:3.1.2
-IMAGE_CACHES="docker.io=https://registry-1.docker.io quay.io=https://quay.io ghcr.io=https://ghcr.io registry.k8s.io=https://registry.k8s.io public.ecr.aws=https://public.ecr.aws"
+IMAGE_CACHES="docker.io=https://registry-1.docker.io quay.io=https://quay.io ghcr.io=https://ghcr.io registry.k8s.io=https://registry.k8s.io"
 
 start_image_caches() {
   local entry registry upstream name
