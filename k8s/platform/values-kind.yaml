@@ -1,0 +1,4 @@
+# kind (scripts/kind-up.sh): the defaults in values.yaml are kind's. This file exists so every cluster is started
+# the same way, with values-<cluster>.yaml.
+storefrontPath: k8s/overlays/kind-gitops
+clusterConfigPath: k8s/cluster/kind

@@ -1,0 +1,50 @@
+{{- /* One Application per enabled chart in .Values.charts. The chart comes from its repo; its values files come
+from this repo, which is the second source ($values). */ -}}
+{{- range $name, $c := .Values.charts }}
+{{- if $c.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $name }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $c.wave | quote }}
+spec:
+  project: platform
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $c.namespace }}
+  sources:
+    - repoURL: {{ $c.repo }}
+      {{- if hasPrefix "oci://" $c.repo }}
+      path: .
+      {{- else }}
+      chart: {{ $name }}
+      {{- end }}
+      targetRevision: {{ $c.version }}
+      helm:
+        releaseName: {{ $c.release }}
+        {{- with $c.values }}
+        valueFiles:
+          {{- range . }}
+          - $values/{{ . }}
+          {{- end }}
+        {{- end }}
+        {{- with $c.valuesObject }}
+        valuesObject:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- if and (eq $name "kube-prometheus-stack") $.Values.grafanaCloudUrl }}
+        values: |
+          {{- $.Files.Get "files/kps-remote-write.yaml" | replace "GRAFANA_CLOUD_PROM_URL" $.Values.grafanaCloudUrl | nindent 10 }}
+        {{- end }}
+    {{- if $c.values }}
+    - repoURL: {{ $.Values.repoURL }}
+      targetRevision: {{ $.Values.revision }}
+      ref: values
+    {{- end }}
+  syncPolicy:
+    {{- include "platform.syncPolicy" $ | nindent 4 }}
+{{- end }}
+{{- end }}

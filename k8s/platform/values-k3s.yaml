@@ -1,0 +1,13 @@
+# k3s on EC2 (scripts/k3s-up.sh, Phase 4a). Differences from kind, each one something a managed cluster does for you
+# (docs/k3s.md): Postgres backs up to S3 through the Barman Cloud plugin, Prometheus labels what it sends with the
+# cluster name, and Grafana renders dashboard snapshots.
+storefrontPath: k8s/overlays/k3s
+clusterConfigPath: k8s/cluster/k3s
+
+charts:
+  kube-prometheus-stack:
+    values: [k8s/monitoring/kps-values.yaml, k8s/monitoring/kps-values-k3s.yaml]
+  cert-manager:
+    enabled: true
+  plugin-barman-cloud:
+    enabled: true

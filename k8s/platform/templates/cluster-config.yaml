@@ -1,0 +1,54 @@
+# Plain manifests, no charts. monitoring-config comes first: it holds the Alertmanager config Secret, and Alertmanager
+# (kube-prometheus-stack, wave -3) won't start without it. cluster-config needs CRDs from the charts: the Gateway
+# from Envoy Gateway, the Probe and PrometheusRules from kube-prometheus-stack.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.revision }}
+    path: k8s/cluster/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    {{- include "platform.syncPolicy" . | nindent 4 }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: platform
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.revision }}
+    path: {{ .Values.clusterConfigPath }}
+    {{- if .Values.domain }}
+    # *.localhost only resolves on your own machine. Elsewhere, <name>.<server IP>.sslip.io resolves to the server.
+    kustomize:
+      patches:
+        {{- range list "grafana" "prometheus" "alertmanager" }}
+        - target:
+            kind: HTTPRoute
+            name: {{ . }}
+          patch: |-
+            - op: replace
+              path: /spec/hostnames
+              value: [{{ . }}.{{ $.Values.domain }}]
+        {{- end }}
+    {{- end }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    {{- include "platform.syncPolicy" . | nindent 4 }}

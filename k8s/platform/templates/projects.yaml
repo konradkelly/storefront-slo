@@ -1,0 +1,26 @@
+# Two projects with different trust. platform installs operators, so it may create anything anywhere: whoever can
+# change these Applications is a cluster admin. storefront may only touch its own namespace (storefront.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  description: Cluster add-ons (k8s/platform)
+  sourceRepos:
+    - {{ .Values.repoURL }}
+    {{- $repos := list }}
+    {{- range .Values.charts }}
+    {{- $repos = append $repos .repo }}
+    {{- end }}
+    {{- range $repos | uniq | sortAlpha }}
+    - {{ . }}
+    {{- end }}
+  destinations:
+    - namespace: "*"
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"

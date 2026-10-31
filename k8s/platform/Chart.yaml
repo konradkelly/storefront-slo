@@ -1,0 +1,8 @@
+# App-of-apps: Argo CD renders this chart into one Application per cluster add-on, plus the storefront. The root
+# Application that points here ("platform") is created by scripts/argocd-up.sh. Nothing here is installed with helm
+# directly; Argo CD is the only thing that applies it.
+apiVersion: v2
+name: platform
+description: Every Argo CD Application in a storefront lab cluster
+type: application
+version: 0.1.0

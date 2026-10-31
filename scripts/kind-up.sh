@@ -1,15 +1,19 @@
 #!/bin/bash
 # Brings up the full kind environment from scratch, or re-applies it on an existing cluster. Safe to rerun.
 #   bash scripts/kind-up.sh
+#   REVISION=<branch> bash scripts/kind-up.sh    # track a pushed branch instead of main
 #
-# Needs: Docker (~9 GiB for Docker/WSL), kind, kubectl, helm. Every kubectl/helm call names the context, so other
-# clusters in your kubeconfig are never touched.
+# The script creates the cluster, its network plugin and the Secrets. Argo CD then installs everything else from
+# GitHub (k8s/platform), so the cluster runs what's on main, not what's in your working tree.
+#
+# Needs: Docker (~9 GiB for Docker/WSL), kind, kubectl. Every kubectl call names the context, so other clusters in
+# your kubeconfig are never touched.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CTX=kind-storefront
 CALICO_VERSION=v3.32.2
-source scripts/lib/platform.sh # k(), step(), the shared platform and its versions
+source scripts/lib/bootstrap.sh # k(), step(), the Secrets
 
 step "cluster"
 if kind get clusters 2>/dev/null | grep -qx storefront; then
@@ -25,23 +29,11 @@ fi
 k -n kube-system rollout status ds/calico-node --timeout=300s
 k wait --for=condition=Ready nodes --all --timeout=300s
 
-install_monitoring
-install_cnpg
-install_metrics_server
-install_keda
-install_gateway k8s/gateway/gateway.yaml
-k apply -f k8s/gateway/monitoring-routes.yaml
-install_probe
+step "Secrets (the only cluster state that isn't in git)"
+create_slack_secret
 
-step "storefront-api image"
-docker build -q -t storefront-api:dev ./app
-kind load docker-image storefront-api:dev --name storefront
-
-step "storefront workloads and SLO rules"
-k apply -k k8s/overlays/kind
-k -n storefront wait --for=condition=Ready cluster/storefront-db --timeout=600s
-k -n storefront rollout restart deploy/storefront-api >/dev/null # pick up a freshly loaded :dev image
-k -n storefront rollout status deploy/storefront-api --timeout=300s
+step "Argo CD, then the platform and the storefront from git"
+bash scripts/argocd-up.sh kind
 
 step "done"
 echo "Storefront:    http://storefront.localhost/products"
