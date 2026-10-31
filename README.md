@@ -8,11 +8,12 @@ rate lets you break things on purpose and watch the dashboards and alerts react.
 
 ```
 app/          Spring Boot API (products, cart, checkout, fake payments)
-k8s/          Kustomize base/ (app, Postgres, ServiceMonitor, SLO rules) + overlays/kind and k3s; monitoring values, k6 Job
+k8s/          Kustomize base/ (app, Postgres, ServiceMonitor, SLO rules) + overlays/kind and k3s; platform/ (Argo CD
+              app-of-apps) and cluster/ (Gateway, routes, probe); monitoring values, k6 Job
 terraform/    AWS: bootstrap (state, budget, CI role) and k3s on EC2 (Phase 4a)
 prometheus/   Compose scrape config, SLO recording rules, burn-rate alerts, promtool tests
 alertmanager/ routing, inhibition, Slack template, local webhook logger (secrets are gitignored)
-scripts/      kind-up.sh / k3s-up.sh (shared platform in lib/), gen-k8s-rules.sh, experiments
+scripts/      kind-up.sh / k3s-up.sh / argocd-up.sh (bootstrap; Argo CD does the rest), gen-k8s-rules.sh, experiments
 loadtest/     k6 script: realistic browsing (default) or checkout-heavy stress
 docs/         SLO spec, runbooks, postmortem template, roadmap, architecture notes
 ```
@@ -120,7 +121,7 @@ On Git Bash for Windows, prefix the `docker run` with `MSYS_NO_PATHCONV=1` and u
 
 ## Step 2: deploy to kind
 
-Prerequisites: `kind`, `kubectl` and `helm` (`winget install Kubernetes.kind Helm.Helm` on Windows), and about
+Prerequisites: `kind` and `kubectl` (`winget install Kubernetes.kind Kubernetes.kubectl` on Windows), and about
 9 GB of memory for Docker. On Docker Desktop with WSL 2 that's `[wsl2]` / `memory=9GB` in `%USERPROFILE%\.wslconfig`,
 then `wsl --shutdown` and restart Docker Desktop. Stop the Compose stack first (`docker compose down`).
 
@@ -129,11 +130,14 @@ bash scripts/kind-up.sh
 ```
 
 The script is safe to rerun. It creates a 4-node cluster ([k8s/kind-config.yaml](k8s/kind-config.yaml): 1 control plane,
-3 workers in fake zones a/b/c), installs Calico (kind's default network plugin doesn't enforce NetworkPolicy) and
-kube-prometheus-stack, loads the Slack secret from `alertmanager/secrets/`, deploys the alert logger and the
-dashboards, then builds, loads and deploys the app with its SLO rules and alerts. Alertmanager on kind uses the same
-`alertmanager/alertmanager.yml` as Compose. Every command names the `kind-storefront` context, so other clusters
-in your kubeconfig are left alone.
+3 workers in fake zones a/b/c), installs Calico (kind's default network plugin doesn't enforce NetworkPolicy), loads
+the Slack secret from `alertmanager/secrets/`, and installs Argo CD. Argo CD then installs everything else from
+GitHub, in order: monitoring, the operators, the Gateway, and the app with its SLO rules and alerts
+([k8s/platform](k8s/platform), an app-of-apps). On a new cluster that takes 30-40 minutes, mostly pulling images.
+
+So the cluster runs what's on `main`, not what's in your working tree. To try a branch, push it and run
+`REVISION=<branch> bash scripts/kind-up.sh`. Alertmanager on kind uses the same `alertmanager/alertmanager.yml` as
+Compose. Every command names the `kind-storefront` context, so other clusters in your kubeconfig are left alone.
 
 Everything is reachable on port 80 through the cluster's Gateway (Envoy Gateway, `k8s/gateway/`). No port-forwards are
 needed, and `*.localhost` resolves to 127.0.0.1 without any hosts-file entries:

@@ -1,5 +1,5 @@
-# kube-prometheus-stack values (chart 91.9.0), the same on kind and k3s. Installed by scripts/lib/platform.sh.
-# The Alertmanager config and Slack template come from alertmanager/ (shared with Compose) via --set-file.
+# kube-prometheus-stack values (chart 91.9.0), the same on kind and k3s. Argo CD installs the chart
+# (k8s/platform/values.yaml).
 
 # kind runs etcd, the scheduler, the controller manager and kube-proxy with metrics bound to localhost, so
 # Prometheus can't scrape them and their "...Down" alerts would fire forever. k3s runs them all inside one k3s
@@ -39,7 +39,11 @@ prometheus:
 
 alertmanager:
   alertmanagerSpec:
-    # Slack webhook URLs, created by scripts/kind-up.sh from the gitignored alertmanager/secrets/ files.
+    # The config is alertmanager/alertmanager.yml plus its Slack template, shared with Compose. k8s/cluster/monitoring
+    # builds this Secret from those files, so the chart doesn't generate one of its own.
+    useExistingSecret: true
+    configSecret: alertmanager-storefront
+    # Slack webhook URLs, created by the bootstrap script from the gitignored alertmanager/secrets/ files.
     # Mounted at /etc/alertmanager/secrets/alertmanager-slack/, the path alertmanager.yml reads.
     secrets:
       - alertmanager-slack

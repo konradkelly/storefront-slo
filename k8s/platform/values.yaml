@@ -1,0 +1,91 @@
+# Defaults for every cluster. values-<cluster>.yaml overrides them, and scripts/argocd-up.sh sets the per-run values
+# (revision, domain, grafanaCloudUrl) on the root Application.
+
+repoURL: https://github.com/konradkelly/storefront-slo.git
+# The git revision every child app tracks. REVISION=<branch> bash scripts/argocd-up.sh tries a pushed branch.
+revision: main
+
+# k3s only, set by scripts/k3s-up.sh: the monitoring UIs answer on <name>.<domain> (<server IP>.sslip.io), and
+# grafanaCloudUrl turns on remote write (files/kps-remote-write.yaml). Empty on kind.
+domain: ""
+grafanaCloudUrl: ""
+
+# The storefront app (an overlay of k8s/base) and the cluster's own manifests (k8s/cluster/<cluster>).
+storefrontPath: k8s/overlays/kind-gitops
+clusterConfigPath: k8s/cluster/kind
+
+# Helm charts, one Application each, in sync-wave order: Argo CD applies a wave only once every app in the waves
+# before it is Healthy. So operators come up before anything that needs their CRDs or webhooks:
+#   -4 monitoring-config (the Alertmanager config Secret must exist before Alertmanager starts)
+#   -3 kube-prometheus-stack (ServiceMonitor/PodMonitor CRDs, which the other charts create), cert-manager
+#   -2 the other operators
+#   -1 cluster-config (Gateway, routes, Probe), blackbox-exporter
+#    0 the storefront
+# values: files in this repo, layered in order. Versions are pinned; upgrade one chart at a time.
+charts:
+  kube-prometheus-stack:
+    enabled: true
+    repo: https://prometheus-community.github.io/helm-charts
+    version: 91.9.0
+    release: kps
+    namespace: monitoring
+    wave: -3
+    values: [k8s/monitoring/kps-values.yaml]
+  cloudnative-pg:
+    enabled: true
+    repo: https://cloudnative-pg.github.io/charts
+    version: 0.29.1 # operator 1.30.1
+    release: cnpg
+    namespace: cnpg-system
+    wave: -2
+    values: [k8s/monitoring/cnpg-values.yaml]
+  metrics-server:
+    enabled: true
+    repo: https://kubernetes-sigs.github.io/metrics-server/
+    version: 3.14.0 # app 0.9.0; pod CPU for kubectl top and the KEDA cpu trigger
+    release: metrics-server
+    namespace: kube-system
+    wave: -2
+    values: [k8s/monitoring/metrics-server-values.yaml]
+  keda:
+    enabled: true
+    repo: https://kedacore.github.io/charts
+    version: 2.21.0
+    release: keda
+    namespace: keda
+    wave: -2
+    values: [k8s/monitoring/keda-values.yaml]
+  envoy-gateway:
+    enabled: true
+    # An OCI chart: no chart name, the repo URL is the chart. ingress-nginx was retired in March 2026.
+    repo: oci://registry-1.docker.io/envoyproxy/gateway-helm
+    version: 1.9.2
+    release: eg
+    namespace: envoy-gateway-system
+    wave: -2
+  prometheus-blackbox-exporter:
+    enabled: true
+    repo: https://prometheus-community.github.io/helm-charts
+    version: 11.20.2 # blackbox-exporter v0.29.1; runs the synthetic probe (k8s/monitoring/storefront-probe.yaml)
+    release: blackbox
+    namespace: monitoring
+    wave: -1
+    values: [k8s/monitoring/blackbox-values.yaml]
+  # CloudNativePG backups to S3 (k3s): the Barman Cloud plugin, which needs cert-manager for its TLS certificates.
+  cert-manager:
+    enabled: false
+    repo: https://charts.jetstack.io
+    version: v1.21.2
+    release: cert-manager
+    namespace: cert-manager
+    wave: -3
+    valuesObject:
+      crds:
+        enabled: true
+  plugin-barman-cloud:
+    enabled: false
+    repo: https://cloudnative-pg.github.io/charts
+    version: 0.8.1 # plugin v0.15.1
+    release: barman-cloud
+    namespace: cnpg-system
+    wave: -2

@@ -1,13 +1,15 @@
-# The k3s cluster's Argo CD (scripts/argocd-up.sh k3s): same project and sync policy as kind (storefront.yaml),
-# pointed at overlays/k3s. Each cluster runs its own Argo CD in 4a; one hub managing all clusters is a 4c decision.
+# The storefront app, last: it needs CloudNativePG, KEDA, the Gateway and the monitoring CRDs. Its project only
+# reaches the storefront namespace, and pruning stays off so a bad commit can't delete the database.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
   name: storefront
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
 spec:
   sourceRepos:
-    - https://github.com/konradkelly/storefront-slo.git
+    - {{ .Values.repoURL }}
   destinations:
     - namespace: storefront
       server: https://kubernetes.default.svc
@@ -20,12 +22,14 @@ kind: Application
 metadata:
   name: storefront
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   project: storefront
   source:
-    repoURL: https://github.com/konradkelly/storefront-slo.git
-    targetRevision: main
-    path: k8s/overlays/k3s
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.revision }}
+    path: {{ .Values.storefrontPath }}
   destination:
     server: https://kubernetes.default.svc
     namespace: storefront

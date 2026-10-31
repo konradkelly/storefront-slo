@@ -1,0 +1,14 @@
+# k3s's own manifests (Phase 4a). Argo CD syncs this as cluster-config (k8s/platform/templates/cluster-config.yaml):
+# kind's set with a ServiceLB Gateway instead of a hostPort, plus what you need when you own the machines (node
+# alerts) and hourly dashboard snapshots to S3. The monitoring routes' hostnames get the server's IP from the
+# cluster-config Application (domain, set by scripts/k3s-up.sh).
+#   kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/cluster/k3s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../gateway/gateway-k3s.yaml
+  - ../../gateway/monitoring-routes.yaml
+  - ../../monitoring/storefront-probe.yaml
+  - ../../monitoring/node-alerts.yaml
+  - ../../monitoring/grafana-snapshots.yaml

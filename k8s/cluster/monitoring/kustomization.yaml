@@ -1,0 +1,39 @@
+# The monitoring pieces that aren't Helm charts, the same on every cluster. Argo CD syncs this as monitoring-config
+# (k8s/platform/templates/cluster-config.yaml), before kube-prometheus-stack.
+#
+# The Alertmanager config, its Slack template, the logger script and the dashboards are shared with Docker Compose,
+# so they're built from the files Compose reads instead of copies. Those live outside this directory, which
+# kustomize only allows with --load-restrictor LoadRestrictionsNone (set for Argo CD in k8s/argocd/argocd-cm.yaml):
+#   kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/cluster/monitoring
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+
+resources:
+  - ../../monitoring/alert-logger.yaml
+
+secretGenerator:
+  # Alertmanager's config (alertmanagerSpec.configSecret in kps-values.yaml). A Secret only because Alertmanager
+  # requires one: the Slack URLs are in alertmanager-slack, which the bootstrap script creates from local files.
+  # The operator mounts the other keys next to the config, where alertmanager.yml looks for *.tmpl.
+  - name: alertmanager-storefront
+    files:
+      - alertmanager.yaml=../../../alertmanager/alertmanager.yml
+      - slack.tmpl=../../../alertmanager/templates/slack.tmpl
+    options:
+      disableNameSuffixHash: true # configSecret refers to it by name
+
+configMapGenerator:
+  # Hashed name: a changed script gets a new ConfigMap, and kustomize points the Deployment at it, so it restarts.
+  - name: alert-logger-script
+    files:
+      - webhook-logger.py=../../../alertmanager/webhook-logger.py
+  # The Grafana sidecar loads every ConfigMap labeled grafana_dashboard=1 (kps-values.yaml).
+  - name: storefront-dashboards
+    files:
+      - storefront.json=../../../grafana/dashboards/storefront.json
+      - slo.json=../../../grafana/dashboards/slo.json
+    options:
+      disableNameSuffixHash: true # a renamed copy would show each dashboard twice until the old one is pruned
+      labels:
+        grafana_dashboard: "1"

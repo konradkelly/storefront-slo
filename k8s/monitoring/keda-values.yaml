@@ -1,4 +1,4 @@
-# KEDA values (chart 2.21.0). Installed by scripts/kind-up.sh into the keda namespace.
+# KEDA values (chart 2.21.0). Argo CD installs it into the keda namespace (k8s/platform).
 # KEDA turns ScaledObjects (k8s/base/autoscaling.yaml) into an HPA fed with external metrics, here a Prometheus query.
 resources:
   operator:

@@ -2,7 +2,7 @@
 # through the cluster Gateway: Envoy, the HTTPRoute, the API and Postgres, the same path a customer's request takes
 # once it is inside the cluster. probe_success is recorded whether or not anyone else is sending traffic, so an
 # outage shows up as time, not only as the requests that happened to be counted. StorefrontProbeFailing
-# (prometheus/rules/slo-alerts.yml) pages on it. Applied by scripts/lib/platform.sh (install_probe).
+# (prometheus/rules/slo-alerts.yml) pages on it. In k8s/cluster/kind and k8s/cluster/k3s.
 #
 # What it doesn't cover: the way in from outside the cluster. On k3s that's the Elastic IP and the server's
 # ServiceLB, which the probe skips by calling the Envoy Service directly. Only a probe outside the cluster sees those.

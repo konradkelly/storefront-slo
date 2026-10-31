@@ -58,35 +58,62 @@ Signing records provenance; admission enforcement of signatures is future work.
 
 ## Argo CD
 
-The existing lab must have its operators installed (CloudNativePG, KEDA, monitoring, Gateway).
-Bootstrap it with `bash scripts/kind-up.sh`, then:
+Argo CD installs the whole cluster from git, not only the app. `scripts/kind-up.sh` (and `k3s-up.sh`) create the
+cluster, its network plugin and the Secrets that come from local files, then run `scripts/argocd-up.sh`. That
+installs Argo CD and one root Application, `platform`, which renders [k8s/platform](../k8s/platform): a Helm chart
+whose output is one Application per add-on, plus the storefront.
+
+| Wave | Applications | Why this order |
+|------|--------------|----------------|
+| -5 | projects `platform`, `storefront` | the Applications below belong to them |
+| -4 | `monitoring-config`: Alertmanager config Secret, dashboards, alert logger ([k8s/cluster/monitoring](../k8s/cluster/monitoring)) | Alertmanager won't start without its config |
+| -3 | `kube-prometheus-stack`, `cert-manager` (k3s) | the ServiceMonitor, PodMonitor and PrometheusRule CRDs the other charts use |
+| -2 | `cloudnative-pg`, `keda`, `metrics-server`, `envoy-gateway`, `plugin-barman-cloud` (k3s) | operators and their CRDs and webhooks |
+| -1 | `cluster-config`: Gateway, monitoring routes, Probe, node alerts (k3s) ([k8s/cluster](../k8s/cluster)), `prometheus-blackbox-exporter` | need the Gateway and Probe CRDs |
+| 0 | `storefront` (`overlays/kind-gitops` or `overlays/k3s`) | needs CloudNativePG, KEDA, the Gateway and the monitoring CRDs |
+
+Chart versions and values files are in [k8s/platform/values.yaml](../k8s/platform/values.yaml), with per-cluster
+overrides in `values-kind.yaml` and `values-k3s.yaml`. The Alertmanager config, Slack template, logger script and
+dashboards are built from the same files Compose reads (`alertmanager/`, `grafana/dashboards/`), so there's one copy
+of each.
+
+Things that took a few tries on the first rebuild (2026-10-31), each with a comment where it's fixed:
+
+- **A wave waits only while a child is Progressing.** Argo CD's documented health check for Applications passes the
+  child's health through, so a child that hadn't synced yet (Missing) or whose first attempt failed (Degraded) let
+  the next wave start. The Envoy Gateway CRDs had timed out, and `cluster-config` failed with "EnvoyProxy not found".
+  [k8s/argocd/argocd-cm.yaml](../k8s/argocd/argocd-cm.yaml) counts a child as Progressing until it has synced and
+  stopped retrying. Retries have no limit, because after its last retry Argo CD doesn't sync the same commit again.
+- **Server-side apply needs server-side diff.** The platform apps apply server-side, because the biggest CRDs and the
+  dashboard ConfigMap don't fit client-side apply's 256 KiB annotation. Compared client-side, every default the API
+  server fills in (an HTTPRoute backend's `kind`, `group`, `weight`) looked like drift, forever. Each platform
+  Application sets `compare-options: ServerSideDiff=true`.
+- **kind's control plane needs slack.** Bringing everything up at once slowed the API server enough that the controller
+  manager and scheduler lost their leader leases and restarted every few minutes, which stopped Jobs, rollouts and
+  garbage collection. They now hold their lease for 60 s ([k8s/kind-config.yaml](../k8s/kind-config.yaml)), and the
+  node image is pinned to CI's v1.34.0; unpinned, kind v0.33 made 1.37 nodes.
+
+Watch it from the UI:
 
 ```bash
-bash scripts/argocd-up.sh
 kubectl --context kind-storefront -n argocd port-forward svc/argocd-server 8081:443
-```
-
-The UI is at `https://localhost:8081`. Retrieve the initial password locally:
-
-```bash
 kubectl --context kind-storefront -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath='{.data.password}' | base64 --decode
 ```
 
-The bootstrap deliberately stops before applying the Application if the image still says
-`awaiting-first-release`. After the first promotion, applying `k8s/argocd/storefront.yaml`
-enables automated sync/self-healing. The Project permits this source repository and the
-storefront namespace. Pruning is disabled to avoid unattended database or namespace deletion.
-KEDA owns replicas; Argo CD ignores and respects that field during sync.
+The UI is at `https://localhost:8081` (user `admin`). Or from the command line:
+`kubectl --context kind-storefront -n argocd get applications`.
 
-`overlays/kind` continues to load local `:dev` images; `overlays/kind-gitops` pulls registry
-digests. Once Argo owns the app, avoid rerunning kind-up.sh's app deployment or imperative
-`kubectl set env`: Argo self-healing will restore Git's values. Make experiment/config changes
-in Git, or temporarily disable self-healing for a deliberate lab experiment.
+Every app self-heals, so a `kubectl apply` or `kubectl set env` gets undone within minutes. Make changes in git. To
+try something before merging, push a branch and point the cluster at it with `REVISION=<branch> bash
+scripts/argocd-up.sh`, or turn off automated sync on that one Application. The storefront app doesn't prune, so a bad
+commit can't delete the database. Its project only reaches the storefront namespace, while `platform` can change
+anything: whoever can edit those Applications is a cluster admin. KEDA owns the API's replica count; Argo CD ignores
+that field.
 
-This first Application manages the storefront workloads and SLO rules. Moving the Helm
-platform into an app-of-apps and sealing Slack secrets remain Phase 3.2 work. Argo Rollouts,
-canary-specific recording rules, and the bad-release rollback experiment remain Phase 3.3.
+What isn't in git: the Secrets made from local files (Slack webhook URLs, S3 and Grafana Cloud credentials), until
+External Secrets in Phase 4b, and the root Application itself, which says which cluster this is. Argo CD doesn't
+manage its own installation either; `argocd-up.sh` applies the pinned upstream manifest.
 
 ## Local smoke and security checks
 

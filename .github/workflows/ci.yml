@@ -80,6 +80,10 @@ jobs:
           curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl -o kubectl
           curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl.sha256 -o kubectl.sha256
           echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          # Renders the app-of-apps chart (k8s/platform). Argo CD 3.5 renders charts with Helm 4 as well.
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz -o helm.tar.gz
+          echo '86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb  helm.tar.gz' | sha256sum --check
+          tar -xzf helm.tar.gz --strip-components=1 linux-amd64/helm
           chmod +x kubectl kubeconform kube-linter
           echo "$RUNNER_TEMP/ci-tools" >> "$GITHUB_PATH"
       - name: Render, validate and lint
