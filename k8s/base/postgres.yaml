@@ -9,6 +9,9 @@ kind: Cluster
 metadata:
   name: storefront-db
   namespace: storefront
+  # Argo CD prunes what leaves git, but never this (k8s/platform/templates/storefront.yaml).
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   instances: 2
   # Same Postgres major/minor as Compose. "minimal" is CNPG's smallest image: no extra extensions, which the app

@@ -12,6 +12,9 @@ kind: ObjectStore
 metadata:
   name: storefront-backups
   namespace: storefront
+  # Argo CD prunes what leaves git, but never this (k8s/platform/templates/storefront.yaml).
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   configuration:
     # Bucket created by terraform/aws/k3s/backups.tf (the name includes the account ID).

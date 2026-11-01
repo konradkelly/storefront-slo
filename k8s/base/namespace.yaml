@@ -6,6 +6,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: storefront
+  # Argo CD prunes what leaves git, but never this (k8s/platform/templates/storefront.yaml).
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest

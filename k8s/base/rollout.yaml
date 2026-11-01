@@ -13,8 +13,8 @@ metadata:
   name: storefront-api
   namespace: storefront
 spec:
-  # Only the first sync sets this (minimum one per zone). After that KEDA owns the count (autoscaling.yaml), and Argo
-  # CD ignores it (k8s/platform/templates/storefront.yaml). Without it the Rollout would start at 1 replica.
+  # The starting count (minimum one per zone). KEDA owns it after that (autoscaling.yaml), and Argo CD ignores it
+  # (k8s/platform/templates/storefront.yaml). Without it the Rollout would start at 1 replica.
   replicas: 3
   revisionHistoryLimit: 3
   selector:
