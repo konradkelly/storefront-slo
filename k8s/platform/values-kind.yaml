@@ -6,7 +6,8 @@ clusterConfigPath: k8s/cluster/kind
 # kind's control plane shares the laptop's cores with everything else. During a rebuild etcd answered in up to a second,
 # and operators that couldn't renew their 15-second leader lease restarted. KEDA restarted 5 times, and each restart
 # took its metrics APIService down, which made the API server rebuild its OpenAPI spec across 74 CRDs and slowed
-# everything further. Envoy Gateway's controller restarted 30 times in an afternoon, once while a load test started. A 60-second lease rides that out, the same as kind's controller manager (k8s/kind-config.yaml).
+# everything further. Envoy Gateway's controller restarted 30 times in an afternoon, once while a load test started.
+# A 60-second lease rides that out, the same as kind's controller manager (k8s/kind-config.yaml).
 # Not on k3s: with one operator replica, a crashed operator's replacement waits out the old lease before taking over.
 charts:
   keda:
