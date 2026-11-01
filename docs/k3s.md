@@ -68,6 +68,19 @@ latency, checkouts, pool usage, restarts, node memory/disk/CPU, and Postgres arc
 the free tier), are labeled `cluster="k3s-aws"`, and the committed dashboards import directly. Screenshot or
 link them in write-ups before they age out.
 
+The database survives the instances being replaced, but not `make down`. Terraform replaces all three instances when
+their boot script changes, and their volumes go with them, while the backup bucket stays. When `make up` then makes
+a new database and finds a completed base backup in the bucket, it restores from it instead of starting empty:
+
+1. It moves the archive from `storefront-db/` to `storefront-db-previous/` (copy, then delete). A new database only
+   archives into an empty folder: on 2026-10-31 a new database couldn't archive at all ("Expected empty archive")
+   until the old archive was deleted by hand.
+2. It points Argo CD at [k8s/overlays/k3s-restore](../k8s/overlays/k3s-restore), which bootstraps the Cluster by
+   recovery from `storefront-db-previous`: the latest base backup plus every archived WAL segment after it.
+
+On a rerun with the database already there, it keeps whichever overlay the database was created with. WAL with no base
+backup to replay it onto is deleted. `make down` deletes the bucket, so the next `make up` starts empty.
+
 ## How long to run it
 
 Size runs by the alert windows, not the calendar:

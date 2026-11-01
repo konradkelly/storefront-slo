@@ -79,10 +79,52 @@ echo "BUCKET=$(tf output -raw backup_bucket)" >> "$creds" # kubectl 1.36 refuses
 k -n monitoring create secret generic grafana-snapshots-s3 --from-env-file="$creds" --dry-run=client -o yaml | k apply -f -
 rm -f "$creds"
 
+step "Database: new, restored from S3, or the one already running"
+# The bucket outlives the instances when Terraform replaces them (a changed boot script), and their volumes don't. So
+# a new database may find the previous one's archive. It restores from it (k8s/overlays/k3s-restore), and since a
+# database only archives into an empty folder, the archive moves from storefront-db/ to storefront-db-previous/ first.
+# The move copies everything before deleting anything, and deletes the backup.info files first, so a rerun after an
+# interruption never mistakes a half-moved archive for a complete one.
+bucket=$(tf output -raw backup_bucket)
+archive="s3://$bucket/storefront-db"
+has_base_backup() { # a completed base backup in this archive folder
+  local f
+  for f in $(aws s3 ls "$archive/$1/base/" --recursive | awk '/backup\.info$/ {print $4}'); do
+    aws s3 cp "s3://$bucket/$f" - | grep -q '^status=DONE' && return 0
+  done
+  return 1
+}
+storefront_path=k8s/overlays/k3s
+if k -n storefront get cluster storefront-db >/dev/null 2>&1; then
+  # Its bootstrap only mattered when it was created: keep the overlay it was created with.
+  storefront_path=$(k -n argocd get application storefront -o jsonpath='{.spec.source.path}' 2>/dev/null || true)
+  storefront_path=${storefront_path:-k8s/overlays/k3s}
+  echo "The database exists: keeping $storefront_path"
+elif has_base_backup storefront-db; then
+  echo "The previous database's archive is in $archive/storefront-db: moving it to storefront-db-previous to restore from"
+  aws s3 rm "$archive/storefront-db-previous/" --recursive --only-show-errors # an older one, superseded
+  aws s3 cp "$archive/storefront-db/" "$archive/storefront-db-previous/" --recursive --only-show-errors
+  aws s3 rm "$archive/storefront-db/" --recursive --exclude '*' --include '*backup.info' --only-show-errors
+  aws s3 rm "$archive/storefront-db/" --recursive --only-show-errors
+  storefront_path=k8s/overlays/k3s-restore
+elif has_base_backup storefront-db-previous; then
+  echo "Restoring from $archive/storefront-db-previous (moved there by an earlier run)"
+  storefront_path=k8s/overlays/k3s-restore
+else
+  echo "No base backup in $archive: a new, empty database"
+fi
+# What's left in storefront-db/ without a base backup is WAL that can't be restored, and it would stop the new
+# database from archiving ("Expected empty archive").
+if ! k -n storefront get cluster storefront-db >/dev/null 2>&1 && [ -n "$(aws s3 ls "$archive/storefront-db/")" ]; then
+  echo "Removing WAL without a base backup from $archive/storefront-db"
+  aws s3 rm "$archive/storefront-db/" --recursive --only-show-errors
+fi
+
 step "Argo CD, then the platform and the storefront from git"
 # *.localhost only works on your own machine, so the monitoring UIs use sslip.io: <name>.<ip>.sslip.io resolves to
 # <ip> without any DNS setup.
-DOMAIN="$server_ip.sslip.io" GRAFANA_CLOUD_URL="$gc_url" bash scripts/argocd-up.sh k3s
+DOMAIN="$server_ip.sslip.io" GRAFANA_CLOUD_URL="$gc_url" STOREFRONT_PATH="$storefront_path" \
+  bash scripts/argocd-up.sh k3s
 
 step "done"
 echo "Storefront:    http://$server_ip/products"

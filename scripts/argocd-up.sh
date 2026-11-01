@@ -3,7 +3,7 @@
 # one Application per add-on (monitoring, operators, the Gateway) plus the storefront, synced from git in waves.
 # Called by kind-up.sh and k3s-up.sh once the cluster and its Secrets exist; safe to rerun.
 #   bash scripts/argocd-up.sh          # kind
-#   bash scripts/argocd-up.sh k3s      # k3s on EC2 (k3s-up.sh sets DOMAIN and GRAFANA_CLOUD_URL)
+#   bash scripts/argocd-up.sh k3s      # k3s on EC2 (k3s-up.sh sets DOMAIN, GRAFANA_CLOUD_URL and STOREFRONT_PATH)
 # REVISION=<branch> makes every app track that branch instead of main. Push it first: Argo CD reads GitHub.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -46,6 +46,7 @@ spec:
         revision: $revision
         domain: "${DOMAIN:-}"
         grafanaCloudUrl: "${GRAFANA_CLOUD_URL:-}"
+        ${STOREFRONT_PATH:+storefrontPath: $STOREFRONT_PATH}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

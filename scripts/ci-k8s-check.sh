@@ -13,6 +13,7 @@ kubectl kustomize k8s/overlays/kind > "$render_dir/kind.yaml"
 kubectl kustomize k8s/overlays/kind-gitops > "$render_dir/kind-gitops.yaml"
 kubectl kustomize k8s/overlays/ci > "$render_dir/ci.yaml"
 kubectl kustomize k8s/overlays/k3s > "$render_dir/k3s.yaml"
+kubectl kustomize k8s/overlays/k3s-restore > "$render_dir/k3s-restore.yaml"
 # What Argo CD renders: the app-of-apps for each cluster (k3s with every optional value set), and the plain-manifest
 # apps, which read shared files from outside their directory (k8s/argocd/argocd-cm.yaml).
 helm template platform k8s/platform -f k8s/platform/values-kind.yaml > "$render_dir/platform-kind.yaml"
@@ -27,10 +28,10 @@ kubeconform -strict -summary -kubernetes-version 1.34.0 \
   -schema-location default \
   -schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/$crd_catalog/{{ .Group }}/{{ .ResourceKind }}_{{ .ResourceAPIVersion }}.json" \
   "$render_dir/base.yaml" "$render_dir/kind.yaml" "$render_dir/kind-gitops.yaml" "$render_dir/ci.yaml" \
-  "$render_dir/k3s.yaml" "$render_dir"/platform-*.yaml "$render_dir"/cluster-*.yaml \
+  "$render_dir/k3s.yaml" "$render_dir/k3s-restore.yaml" "$render_dir"/platform-*.yaml "$render_dir"/cluster-*.yaml \
   k8s/monitoring/soak-drill.yaml k8s/loadtest/k6-job.yaml
 
 # Lint the deployable overlay: base intentionally leaves its image tag to overlays.
 # The platform's own manifests (k8s/cluster) and the load test receive schema validation above.
 kube-linter lint --config .kube-linter.yaml \
-  "$render_dir/kind.yaml" "$render_dir/kind-gitops.yaml" "$render_dir/k3s.yaml"
+  "$render_dir/kind.yaml" "$render_dir/kind-gitops.yaml" "$render_dir/k3s.yaml" "$render_dir/k3s-restore.yaml"

@@ -1,0 +1,37 @@
+# k3s, with a database restored from S3 instead of created empty. scripts/k3s-up.sh picks this overlay when it makes a
+# new database while the bucket still holds the previous one's archive (the instances were replaced, so the old
+# volumes are gone). It first moves that archive from storefront-db/ to storefront-db-previous/, because a new
+# database only archives into an empty folder ("Expected empty archive"). See docs/k3s.md.
+#
+# Recovery replays every archived WAL segment after the latest base backup, so the database comes back as of its last
+# archived transaction. Bootstrap only runs when the Cluster is created; after that this overlay is k3s's, and
+# k3s-up.sh keeps it for as long as this database exists.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../k3s
+
+patches:
+  - target:
+      kind: Cluster
+      name: storefront-db
+    patch: |-
+      - op: replace
+        path: /spec/bootstrap
+        value:
+          recovery:
+            source: previous
+            # The app's credentials Secret (storefront-db-app) is new, and CloudNativePG sets the restored owner's
+            # password to match it.
+            database: storefront
+            owner: storefront
+      - op: add
+        path: /spec/externalClusters
+        value:
+          - name: previous
+            plugin:
+              name: barman-cloud.cloudnative-pg.io
+              parameters:
+                barmanObjectName: storefront-backups # k8s/overlays/k3s/backups.yaml, the same bucket
+                serverName: storefront-db-previous
