@@ -21,9 +21,11 @@ spec:
       labels:
         app: storefront-api
     spec:
-      # Spread across zones (hard rule) and nodes (soft). The template hash makes each version's ReplicaSet spread
-      # on its own instead of counting the old pods that are about to go away. Pods get pod-template-hash from a
-      # Deployment and rollouts-pod-template-hash from the Rollout; a key the pod doesn't have is ignored.
+      # Spread across zones (hard rule) and nodes (soft). pod-template-hash makes each rollout's new ReplicaSet
+      # spread on its own instead of counting the old pods that are about to go away. Pods the Rollout runs don't
+      # have that label (theirs is rollouts-pod-template-hash), so they spread as one group: a canary's 1-2 pods
+      # still fit. It stays this way because changing the template here starts a rolling update of the Deployment
+      # next to the Rollout's pods: on kind, 7 JVMs starting at once took down Postgres (2026-10-31).
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -35,14 +37,14 @@ spec:
           labelSelector:
             matchLabels:
               app: storefront-api
-          matchLabelKeys: [pod-template-hash, rollouts-pod-template-hash]
+          matchLabelKeys: [pod-template-hash]
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
               app: storefront-api
-          matchLabelKeys: [pod-template-hash, rollouts-pod-template-hash]
+          matchLabelKeys: [pod-template-hash]
       # Shutdown budget: 10s preStop sleep + up to 20s for Spring to finish in-flight requests
       # (spring.lifecycle.timeout-per-shutdown-phase) + margin.
       terminationGracePeriodSeconds: 45
