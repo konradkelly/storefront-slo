@@ -19,17 +19,27 @@ done
 #   NetworkPolicy). --secrets-encryption: Secrets are encrypted at rest in the datastore.
 # Zone/region labels: base/storefront-api.yaml spreads pods across topology.kubernetes.io/zone with DoNotSchedule,
 #   and k3s without a cloud provider sets no zone label, so without these no API pod would schedule.
-curl -sfL https://get.k3s.io | \
-  INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
-  K3S_TOKEN="$token" sh -s - server \
-    --disable traefik \
-    --disable metrics-server \
-    --prefer-bundled-bin \
-    --secrets-encryption \
-    --write-kubeconfig-mode 0600 \
-    --tls-san ${public_ip} \
-    --node-label "topology.kubernetes.io/zone=$zone" \
-    --node-label "topology.kubernetes.io/region=${region}"
+install_k3s() {
+  curl -sfL https://get.k3s.io | \
+    INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
+    K3S_TOKEN="$token" sh -s - server \
+      --disable traefik \
+      --disable metrics-server \
+      --prefer-bundled-bin \
+      --secrets-encryption \
+      --write-kubeconfig-mode 0600 \
+      --tls-san ${public_ip} \
+      --node-label "topology.kubernetes.io/zone=$zone" \
+      --node-label "topology.kubernetes.io/region=${region}"
+}
+# Retried: this script runs only once, so one failed download from GitHub left a server without k3s for good
+# (2026-10-31: "Download failed" after 60 s, and k3s-up.sh waited 15 minutes for a kubeconfig that never came).
+for attempt in 1 2 3 4 5; do
+  install_k3s && break
+  [ "$attempt" = 5 ] && { echo "k3s install failed 5 times"; exit 1; }
+  echo "k3s install failed (attempt $attempt of 5), retrying in 30 s"
+  sleep 30
+done
 
 until /usr/local/bin/k3s kubectl get --raw /readyz >/dev/null 2>&1; do sleep 5; done
 

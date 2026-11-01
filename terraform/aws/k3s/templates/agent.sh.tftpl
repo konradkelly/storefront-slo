@@ -14,11 +14,19 @@ for _ in $(seq 30); do
   sleep 5
 done
 
-# Flags explained in server.sh.tftpl.
-curl -sfL https://get.k3s.io | \
-  INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
-  K3S_URL='https://${server_ip}:6443' K3S_TOKEN="$token" sh -s - agent \
-    --prefer-bundled-bin \
-    --node-label "topology.kubernetes.io/zone=$zone" \
-    --node-label "topology.kubernetes.io/region=${region}"
+# Flags, and why the install is retried, in server.sh.tftpl.
+install_k3s() {
+  curl -sfL https://get.k3s.io | \
+    INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
+    K3S_URL='https://${server_ip}:6443' K3S_TOKEN="$token" sh -s - agent \
+      --prefer-bundled-bin \
+      --node-label "topology.kubernetes.io/zone=$zone" \
+      --node-label "topology.kubernetes.io/region=${region}"
+}
+for attempt in 1 2 3 4 5; do
+  install_k3s && break
+  [ "$attempt" = 5 ] && { echo "k3s install failed 5 times"; exit 1; }
+  echo "k3s install failed (attempt $attempt of 5), retrying in 30 s"
+  sleep 30
+done
 echo "k3s agent started in $zone"
