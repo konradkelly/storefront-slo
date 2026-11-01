@@ -13,7 +13,7 @@ metadata:
 $patch: delete
 ---
 apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+kind: PodMonitor
 metadata:
   name: storefront-api
   namespace: storefront
@@ -44,5 +44,27 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: storefront-api
+  namespace: storefront
+$patch: delete
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storefront-canary-rules
+  namespace: storefront
+$patch: delete
+---
+# No Argo Rollouts here: the Deployment runs the pods itself.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: storefront-api
+  namespace: storefront
+$patch: delete
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: storefront-canary
   namespace: storefront
 $patch: delete

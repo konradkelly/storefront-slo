@@ -41,11 +41,26 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - RespectIgnoreDifferences=true
+  # Fields other controllers own. RespectIgnoreDifferences keeps a sync from resetting them too.
   ignoreDifferences:
-    # KEDA owns the Deployment count; Argo CD must not reset it during sync.
+    # The Rollout keeps the Deployment at 0 (k8s/base/rollout.yaml).
     - group: apps
       kind: Deployment
       name: storefront-api
       namespace: storefront
       jsonPointers:
         - /spec/replicas
+    # KEDA owns the Rollout's count. git sets it only when the Rollout is created.
+    - group: argoproj.io
+      kind: Rollout
+      name: storefront-api
+      namespace: storefront
+      jsonPointers:
+        - /spec/replicas
+    # Argo Rollouts moves traffic between stable and canary here during a release.
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: storefront-api
+      namespace: storefront
+      jqPathExpressions:
+        - .spec.rules[].backendRefs[].weight

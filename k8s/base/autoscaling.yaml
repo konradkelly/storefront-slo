@@ -1,6 +1,6 @@
 # KEDA scales storefront-api on request rate (the same Prometheus metric the SLOs use), with CPU as a backstop.
-# KEDA creates and manages an HPA from this (keda-hpa-storefront-api); never add a second HPA for the Deployment.
-# The Deployment has no `replicas` field, because this owns the count.
+# KEDA creates and manages an HPA from this (keda-hpa-storefront-api); never add a second HPA for the Rollout.
+# It scales the Rollout (rollout.yaml), which runs the pods. During a canary the count covers both versions.
 #
 # Why not CPU alone (the earlier hpa.yaml, exp5 on 2026-10-06): starting JVMs burn 1-2 cores each while warming up,
 # which reads as load. Under a 60-VU spike the CPU HPA went straight to its max of 6, then ran 6 warm pods at
@@ -13,6 +13,8 @@ metadata:
   namespace: storefront
 spec:
   scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
     name: storefront-api
   minReplicaCount: 3 # one per zone
   maxReplicaCount: 6 # bounded by the kind cluster's memory (~330Mi per pod)

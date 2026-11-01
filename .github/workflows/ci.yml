@@ -48,16 +48,16 @@ jobs:
         run: >-
           docker run --rm -v "$PWD/prometheus:/src" -w /src
           --entrypoint promtool prom/prometheus:v3.15.0
-          check rules rules/slo.yml rules/slo-alerts.yml
+          check rules rules/slo.yml rules/slo-alerts.yml rules/canary.yml
       - name: Test SLO rules and alerts
         run: >-
           docker run --rm -v "$PWD/prometheus:/src" -w /src
           --entrypoint promtool prom/prometheus:v3.15.0
-          test rules tests/slo_test.yml tests/slo_alerts_test.yml
+          test rules tests/slo_test.yml tests/slo_alerts_test.yml tests/canary_test.yml
       - name: Check generated Kubernetes rules are current
         run: |
           sh scripts/gen-k8s-rules.sh
-          git diff --exit-code -- k8s/base/slo-rules.yaml k8s/base/slo-alerts.yaml
+          git diff --exit-code -- k8s/base/slo-rules.yaml k8s/base/slo-alerts.yaml k8s/base/canary-rules.yaml
 
   kubernetes:
     name: Kubernetes manifests

@@ -29,8 +29,14 @@ spec:
               drop: ["ALL"]
           args: ["run", "/scripts/checkout.js"]
           env:
+            # Through the Gateway, like a shopper, so during a canary the HTTPRoute's weights split this load too
+            # (k8s/base/rollout.yaml). The Service directly (http://storefront-api.storefront.svc:8080) only reaches
+            # the stable version. The proxy's Service has the same name on every cluster (k8s/monitoring/storefront-probe.yaml).
             - name: BASE_URL
-              value: http://storefront-api.storefront.svc:8080
+              value: http://envoy-gateway-storefront-92f58a48.envoy-gateway-system.svc
+            # kind's route only matches this hostname. k3s's has none, so it matches any.
+            - name: HOST
+              value: storefront.localhost
             # browse (realistic, default) or checkout-stress (saga vs. single-tx experiment)
             - name: PROFILE
               value: browse

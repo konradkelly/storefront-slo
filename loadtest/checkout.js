@@ -2,6 +2,8 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 const BASE = __ENV.BASE_URL || 'http://localhost:8080';
+// Sent as the Host header, for a Gateway whose route matches on hostname (k8s/loadtest/k6-job.yaml).
+const HOST = __ENV.HOST;
 
 // browse (default): a realistic shop. Most sessions only look, ~15% add to cart, about half of those
 //   check out. Catalog to cart traffic is roughly 15:1. Use it for SLO baselines.
@@ -26,7 +28,11 @@ const json = { headers: { 'Content-Type': 'application/json' } };
 // Every request is named after the API's route template (its `uri` label), so k6's metrics line up with the
 // API's. k6 also uses the name as the `url` tag, so the URL's cart ID no longer makes a series per cart: unnamed,
 // a 72-hour soak tracked 800,000 of them. Each iteration still uses its own cart.
-const named = (name, params = {}) => ({ ...params, tags: { ...params.tags, name } });
+const named = (name, params = {}) => ({
+  ...params,
+  headers: { ...params.headers, ...(HOST && { Host: HOST }) },
+  tags: { ...params.tags, name },
+});
 
 // Retried for up to 30s: on k3s, kube-router rejects a new pod's traffic until every node has added its IP to
 // the NetworkPolicy ipsets (1-2s after start), so the first request from the k6 pod can be refused.

@@ -22,3 +22,9 @@ charts:
       additionalArgs:
         - --leader-lease-duration=60
         - --leader-renew-deadline=40
+  argo-rollouts:
+    valuesObject:
+      controller:
+        extraArgs:
+          - --leader-election-lease-duration=60s
+          - --leader-election-renew-deadline=40s

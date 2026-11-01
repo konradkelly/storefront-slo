@@ -18,7 +18,7 @@ clusterConfigPath: k8s/cluster/kind
 # before it is Healthy. So operators come up before anything that needs their CRDs or webhooks:
 #   -4 monitoring-config (the Alertmanager config Secret must exist before Alertmanager starts)
 #   -3 kube-prometheus-stack (ServiceMonitor/PodMonitor CRDs, which the other charts create), cert-manager
-#   -2 the other operators
+#   -2 the other operators (Argo Rollouts among them)
 #   -1 cluster-config (Gateway, routes, Probe), blackbox-exporter
 #    0 the storefront
 # values: files in this repo, layered in order. Versions are pinned; upgrade one chart at a time.
@@ -63,6 +63,14 @@ charts:
     release: eg
     namespace: envoy-gateway-system
     wave: -2
+  argo-rollouts:
+    enabled: true
+    repo: https://argoproj.github.io/argo-helm
+    version: 2.43.8 # controller v1.10.1; canary releases of storefront-api (k8s/base/rollout.yaml)
+    release: argo-rollouts
+    namespace: argo-rollouts
+    wave: -2
+    values: [k8s/monitoring/argo-rollouts-values.yaml]
   prometheus-blackbox-exporter:
     enabled: true
     repo: https://prometheus-community.github.io/helm-charts

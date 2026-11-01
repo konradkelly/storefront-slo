@@ -46,6 +46,17 @@ if [ "$(live)" != "$rate" ]; then
   exit 1
 fi
 event "Argo CD applied PAYMENT_FAILURE_RATE=$rate, rolling out"
-k -n storefront rollout status deploy/storefront-api --timeout=10m >/dev/null && event "rollout complete"
+# The Rollout runs the pods, as a canary of about 10 minutes (k8s/base/rollout.yaml). It's done when it has seen the
+# new template and made it the stable version. Payment declines don't fail the canary analysis, so a fault goes out.
+rollout_done() {
+  local gen observed phase stable current
+  gen=$(k -n storefront get deploy storefront-api -o jsonpath='{.metadata.generation}')
+  read -r observed phase stable current < <(k -n storefront get rollout storefront-api \
+    -o jsonpath='{.status.workloadObservedGeneration} {.status.phase} {.status.stableRS} {.status.currentPodHash}')
+  [ "$observed" = "$gen" ] && [ "$phase" = Healthy ] && [ "$stable" = "$current" ]
+}
+for _ in $(seq 120); do rollout_done && break; sleep 10; done
+rollout_done && event "rollout complete" ||
+  event "rollout not done after 20 min: kubectl -n storefront get rollout storefront-api -o yaml | grep -A20 '^status'"
 k -n monitoring create job --from=cronjob/grafana-snapshots "snap-$(date -u +%m%d-%H%M)-rate-${rate//./-}" >/dev/null &&
   event "snapshot job started"

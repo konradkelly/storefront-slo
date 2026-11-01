@@ -1,0 +1,101 @@
+# Unit tests for prometheus/rules/canary.yml. Run from the repo root:
+#   docker run --rm -v "$PWD/prometheus:/src" -w /src --entrypoint promtool \
+#     prom/prometheus:v3.15.0 test rules tests/canary_test.yml
+rule_files:
+  - ../rules/canary.yml
+  - ../rules/slo.yml
+
+evaluation_interval: 1m
+fuzzy_compare: true
+
+tests:
+  # Two versions side by side. stable (hash "aaa") returns no 5xx at all, so its 500 series doesn't exist: it must get
+  # 0, not drop out. canary ("bbb") fails 10 of 100 checkouts with a 500. Payment declines (402) count as valid
+  # checkouts but not as errors, and 400/409 count as neither.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="201"}'
+        values: '0+95x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="402"}'
+        values: '0+5x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="201"}'
+        values: '0+88x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="402"}'
+        values: '0+2x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="500"}'
+        values: '0+10x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="409"}'
+        values: '0+40x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="400"}'
+        values: '0+40x30'
+    promql_expr_test:
+      - expr: slo_canary:checkout_errors:ratio_rate5m
+        eval_time: 20m
+        exp_samples:
+          - labels: 'slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}'
+            value: 0
+          - labels: 'slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}'
+            value: 0.1
+      # 100 valid checkouts a minute for 5 minutes.
+      - expr: slo_canary:checkout_requests:increase5m
+        eval_time: 20m
+        exp_samples:
+          - labels: 'slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="aaa"}'
+            value: 500
+          - labels: 'slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"}'
+            value: 500
+      # The analysis query (k8s/base/rollout.yaml) for the canary: 10% errors against a 0.5% budget is a burn rate
+      # of 20, over its limit of 6. 1 - 0.995 isn't exact in floating point (19.999999999999982), so check it's
+      # within 1e-9.
+      - expr: |
+          abs((
+            slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
+              / scalar(1 - slo:checkout_availability:objective)
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+          ) - 20) < bool 1e-9
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 1
+
+  # A canary that has served only a few checkouts gets no verdict: the analysis query returns nothing, which passes.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="201"}'
+        values: '0+4x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="500"}'
+        values: '0+1x30'
+    promql_expr_test:
+      - expr: |
+          slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
+            / scalar(1 - slo:checkout_availability:objective)
+          and on(rollouts_pod_template_hash)
+          slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+        eval_time: 20m
+        exp_samples: []
+
+  # Catalog: 5xx on any /products route, per version.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/products", method="GET", status="200"}'
+        values: '0+100x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/products/{id}", method="GET", status="200"}'
+        values: '0+97x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/products/{id}", method="GET", status="503"}'
+        values: '0+3x30'
+    promql_expr_test:
+      - expr: slo_canary:catalog_errors:ratio_rate5m
+        eval_time: 20m
+        exp_samples:
+          - labels: 'slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}'
+            value: 0
+          - labels: 'slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}'
+            value: 0.03
+      - expr: slo_canary:catalog_requests:increase5m
+        eval_time: 20m
+        exp_samples:
+          - labels: 'slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="aaa"}'
+            value: 500
+          - labels: 'slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="bbb"}'
+            value: 500
