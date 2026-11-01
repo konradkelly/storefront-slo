@@ -1,0 +1,29 @@
+# Scrapes every storefront-api pod directly. It was a ServiceMonitor until the canary (rollout.yaml): Argo Rollouts
+# narrows each Service's selector to one version, so a Service-based scrape would lose whichever version that Service
+# doesn't select.
+#
+# kube-prometheus-stack only picks up monitors whose "release" label matches the Helm release name (kps).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: storefront-api
+  namespace: storefront
+  labels:
+    release: kps
+spec:
+  selector:
+    matchLabels:
+      app: storefront-api
+  namespaceSelector:
+    matchNames:
+      - storefront
+  # job="storefront-api", the same as the ServiceMonitor gave (StorefrontApiDown and the dashboards use it).
+  jobLabel: app
+  # Each series gets its pod's version (rollouts_pod_template_hash), which the canary rules group by
+  # (prometheus/rules/canary.yml).
+  podTargetLabels:
+    - rollouts-pod-template-hash
+  podMetricsEndpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s

@@ -8,8 +8,8 @@ rate lets you break things on purpose and watch the dashboards and alerts react.
 
 ```
 app/          Spring Boot API (products, cart, checkout, fake payments)
-k8s/          Kustomize base/ (app, Postgres, ServiceMonitor, SLO rules) + overlays/kind and k3s; platform/ (Argo CD
-              app-of-apps) and cluster/ (Gateway, routes, probe); monitoring values, k6 Job
+k8s/          Kustomize base/ (app as a canary Rollout, Postgres, PodMonitor, SLO rules) + overlays/kind and k3s;
+              platform/ (Argo CD app-of-apps) and cluster/ (Gateway, routes, probe); monitoring values, k6 Job
 terraform/    AWS: bootstrap (state, budget, CI role) and k3s on EC2 (Phase 4a)
 prometheus/   Compose scrape config, SLO recording rules, burn-rate alerts, promtool tests
 alertmanager/ routing, inhibition, Slack template, local webhook logger (secrets are gitignored)
@@ -162,8 +162,8 @@ The `storefront` namespace enforces Pod Security `restricted`, and NetworkPolici
 paths the app needs. Check both directions with `bash scripts/netpol-check.sh`. A new pod or Job there needs a
 restricted-compliant `securityContext`, and the `app.kubernetes.io/component: loadtest` label if it should reach the app.
 
-In Prometheus, check **Status > Targets** for `serviceMonitor/storefront/storefront-api`. If it's missing,
-the `release: kps` label on the ServiceMonitor is the first thing to check.
+In Prometheus, check **Status > Targets** for `podMonitor/storefront/storefront-api`. If it's missing,
+the `release: kps` label on the PodMonitor is the first thing to check.
 
 Three kind-on-Windows problems are already handled in the config. All were seen on this setup:
 

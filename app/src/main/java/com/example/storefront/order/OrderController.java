@@ -2,6 +2,7 @@ package com.example.storefront.order;
 
 import com.example.storefront.metrics.StorefrontMetrics;
 import com.example.storefront.payment.FakePaymentService.PaymentFailedException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 @RestController
 @RequestMapping("/orders")
@@ -20,10 +22,13 @@ public class OrderController {
 
     private final OrderService orderService;
     private final StorefrontMetrics metrics;
+    private final boolean bugMode;
 
-    public OrderController(OrderService orderService, StorefrontMetrics metrics) {
+    public OrderController(OrderService orderService, StorefrontMetrics metrics,
+                           @Value("${storefront.bug-mode}") boolean bugMode) {
         this.orderService = orderService;
         this.metrics = metrics;
+        this.bugMode = bugMode;
     }
 
     // Metrics are recorded here, after the transaction has committed or rolled back,
@@ -32,6 +37,11 @@ public class OrderController {
     public ResponseEntity<?> checkout(@RequestBody CheckoutRequest req) {
         if (req.cartId() == null || req.cartId().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "cartId is required"));
+        }
+        // The canary experiment's bad release (storefront.bug-mode): a 500 that no business counter sees, like an
+        // unhandled exception would be.
+        if (bugMode && ThreadLocalRandom.current().nextDouble() < 0.1) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "BUG_MODE"));
         }
         try {
             CustomerOrder order = orderService.checkout(req.cartId());

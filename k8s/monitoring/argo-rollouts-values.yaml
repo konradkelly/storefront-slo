@@ -1,0 +1,40 @@
+# Argo Rollouts values (chart 2.43.8, controller v1.10.1). Argo CD installs it into the argo-rollouts namespace
+# (k8s/platform). It releases storefront-api as a canary (k8s/base/rollout.yaml): it moves a share of the Gateway's
+# traffic to the new version, checks that version's SLIs in Prometheus, and rolls back on its own if they're bad.
+controller:
+  # One is enough for a lab: while it's down, running pods keep serving and only a release in progress waits.
+  replicas: 1
+  # Traffic splitting through Gateway API comes from a plugin. The init container copies it in from its image, so it
+  # comes from the image cache like everything else, instead of a 78 MB download from GitHub on every controller start.
+  # The chart's providerRBAC (on by default) already lets the controller update HTTPRoutes.
+  initContainers:
+    - name: gatewayapi-plugin
+      image: ghcr.io/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi:v0.17.0
+      command: [cp, /bin/rollouts-plugin-trafficrouter-gatewayapi, /plugins/]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: plugins
+          mountPath: /plugins
+  volumes:
+    - name: plugins
+      emptyDir: {}
+  volumeMounts:
+    - name: plugins
+      mountPath: /plugins
+  trafficRouterPlugins:
+    - name: argoproj-labs/gatewayAPI
+      location: file:///plugins/rollouts-plugin-trafficrouter-gatewayapi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  # rollout_info, analysis_run_metric_phase and friends, for the Argo Rollouts Grafana dashboard.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kps # what kube-prometheus-stack's Prometheus selects on

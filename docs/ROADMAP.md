@@ -440,15 +440,28 @@ Done in 2.2 (`scripts/experiments/exp4-disruption.sh`): 26 failed requests befor
 
 ### 3.3 Progressive delivery (capstone)
 
-- [ ] Replace the Deployment with an **Argo Rollouts** `Rollout` using canary steps (20% → 50% → 100%).
-- [ ] Add an `AnalysisTemplate` that queries the Phase 1 SLI recording rules for the canary pods only,
+- [x] Replace the Deployment with an **Argo Rollouts** `Rollout` using canary steps (20% → 50% → 100%).
+      Done 2026-10-31 (`k8s/base/rollout.yaml`): the Rollout runs the Deployment's template (`workloadRef`), and
+      the Gateway API plugin splits traffic on the HTTPRoute. Five minutes per step.
+- [x] Add an `AnalysisTemplate` that queries the Phase 1 SLI recording rules for the canary pods only,
       and aborts if the error ratio or burn rate goes over budget.
+      Done 2026-10-31: per-version recording rules (`prometheus/rules/canary.yml`, promtool-tested) from a PodMonitor
+      that keeps each pod's `rollouts-pod-template-hash`. Aborts above a burn rate of 6. Counts 5xx only, not payment
+      declines. Fails safe: no verdict needs a scraped canary pod, and a blind check aborts after 4 minutes.
+      Details and what took a few tries: [delivery.md](delivery.md#canary-releases).
+- [ ] Compare the canary with stable over the same minutes, so a database outage during a canary doesn't fail a
+      good release (seen in the experiment's first attempt).
 
 **Done when:** A merge to main reaches the cluster without anyone running `kubectl`.
 
 **Experiment:** Add a `BUG_MODE` flag that makes a build fail 10% of checkouts with a 500, and ship it.
 Argo Rollouts should catch it at 20% and roll back automatically, and the budget spent should be a fraction
 of what a full rollout would have cost. This single demo covers SLOs, Kubernetes, and CI/CD together.
+
+Done 2026-10-31 on kind: aborted at 20% after 4 min 16 s (burn rate 21.7). 8.5 failed checkouts, 0.05% of the
+28-day budget, against ~53 for the same minutes at 100% and ~377 (2.1%) before the fast-burn page would have
+fired. The first attempt promoted the bad release, because the analysis passed when an overloaded cluster stopped
+reporting the canary's metrics; it fails safe now. [delivery.md](delivery.md#experiment-a-bad-release-2026-10-31-kind)
 
 ---
 

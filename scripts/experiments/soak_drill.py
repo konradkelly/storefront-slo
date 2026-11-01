@@ -22,6 +22,7 @@ API = "https://kubernetes.default.svc"
 SA = "/var/run/secrets/kubernetes.io/serviceaccount"
 APP = "/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/storefront"
 DEPLOY = "/apis/apps/v1/namespaces/storefront/deployments/storefront-api"
+ROLLOUT = "/apis/argoproj.io/v1alpha1/namespaces/storefront/rollouts/storefront-api"
 STATE = "/api/v1/namespaces/monitoring/configmaps/soak-drill-state"
 LOG = os.environ.get("LOG", "/log/soak-drill.log")
 
@@ -104,13 +105,18 @@ def snapshot(name):
 
 
 def rolled_out(rate):
-    """True once every API pod runs with this PAYMENT_FAILURE_RATE."""
+    """True once every API pod runs with this PAYMENT_FAILURE_RATE.
+
+    The rate is set in the Deployment's template, but the Rollout runs the pods (k8s/base/rollout.yaml), as a canary
+    that takes about 10 minutes. It's done when the Rollout has seen this template (workloadObservedGeneration) and
+    made it the stable version.
+    """
     d = kube("GET", DEPLOY)
     env = d["spec"]["template"]["spec"]["containers"][0]["env"]
     live = next((e.get("value") for e in env if e["name"] == "PAYMENT_FAILURE_RATE"), None)
-    s = d["status"]
-    return (live == rate and s.get("observedGeneration", 0) >= d["metadata"]["generation"]
-            and s.get("updatedReplicas") == s.get("replicas") == s.get("availableReplicas"))
+    s = kube("GET", ROLLOUT).get("status", {})
+    return (live == rate and s.get("workloadObservedGeneration") == str(d["metadata"]["generation"])
+            and s.get("phase") == "Healthy" and s.get("stableRS") == s.get("currentPodHash"))
 
 
 def alert_states():

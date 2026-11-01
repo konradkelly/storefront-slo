@@ -1,0 +1,37 @@
+# GENERATED from prometheus/rules/canary.yml by scripts/gen-k8s-rules.sh. Edit the source and rerun; don't edit this file.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storefront-canary-rules
+  namespace: storefront
+  labels:
+    release: kps
+spec:
+  groups:
+    - name: slo-canary
+      interval: 30s
+      rules:
+        - record: slo_canary:checkout_errors:ratio_rate5m
+          expr: |
+            (
+              sum by (rollouts_pod_template_hash) (rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[5m]))
+              or
+              sum by (rollouts_pod_template_hash) (rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST"}[5m])) * 0
+            )
+            /
+            sum by (rollouts_pod_template_hash) (rate(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[5m]))
+        - record: slo_canary:checkout_requests:increase5m
+          expr: |
+            sum by (rollouts_pod_template_hash) (increase(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[5m]))
+        - record: slo_canary:catalog_errors:ratio_rate5m
+          expr: |
+            (
+              sum by (rollouts_pod_template_hash) (rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[5m]))
+              or
+              sum by (rollouts_pod_template_hash) (rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[5m])) * 0
+            )
+            /
+            sum by (rollouts_pod_template_hash) (rate(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[5m]))
+        - record: slo_canary:catalog_requests:increase5m
+          expr: |
+            sum by (rollouts_pod_template_hash) (increase(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[5m]))

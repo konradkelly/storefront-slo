@@ -50,6 +50,10 @@ rules:
     resources: ["deployments"]
     resourceNames: ["storefront-api"]
     verbs: ["get"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["rollouts"]
+    resourceNames: ["storefront-api"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

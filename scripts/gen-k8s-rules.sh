@@ -24,3 +24,4 @@ gen() {
 
 gen prometheus/rules/slo.yml k8s/base/slo-rules.yaml storefront-slo-rules
 gen prometheus/rules/slo-alerts.yml k8s/base/slo-alerts.yaml storefront-slo-alerts
+gen prometheus/rules/canary.yml k8s/base/canary-rules.yaml storefront-canary-rules

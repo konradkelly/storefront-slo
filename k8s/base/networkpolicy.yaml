@@ -3,6 +3,7 @@
 # allowed paths work and others are blocked, with scripts/netpol-check.sh.
 #
 #   loadtest (k6, prober) ──8080──▶ storefront-api ──5432──▶ storefront-db ◀──5432──▶ storefront-db (replication)
+#   loadtest (k6) ──10080──▶ Envoy Gateway proxy (so its traffic is split between canary and stable)
 #   Prometheus (monitoring) ──8080──▶ storefront-api        ▲  ▲
 #   Envoy Gateway proxy ──────8080──▶ storefront-api         │  │
 #   Prometheus (monitoring) ──9187──────────────────────────┘  │
@@ -151,6 +152,18 @@ spec:
               app: storefront-api
       ports:
         - { protocol: TCP, port: 8080 }
+    # k6 goes through the Gateway (k8s/loadtest/k6-job.yaml), so a canary gets its share of the load. The proxy's
+    # Service listens on 80, but Envoy runs without root and binds 10080, and policies see the pod's port.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+              app.kubernetes.io/component: proxy
+      ports:
+        - { protocol: TCP, port: 10080 }
     # k6 pushes its own metrics to Prometheus's remote-write receiver (k8s/loadtest/k6-job.yaml).
     - to:
         - namespaceSelector:

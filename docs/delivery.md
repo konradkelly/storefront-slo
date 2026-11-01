@@ -68,9 +68,9 @@ whose output is one Application per add-on, plus the storefront.
 | -5 | projects `platform`, `storefront` | the Applications below belong to them |
 | -4 | `monitoring-config`: Alertmanager config Secret, dashboards, alert logger ([k8s/cluster/monitoring](../k8s/cluster/monitoring)) | Alertmanager won't start without its config |
 | -3 | `kube-prometheus-stack`, `cert-manager` (k3s) | the ServiceMonitor, PodMonitor and PrometheusRule CRDs the other charts use |
-| -2 | `cloudnative-pg`, `keda`, `metrics-server`, `envoy-gateway`, `plugin-barman-cloud` (k3s) | operators and their CRDs and webhooks |
+| -2 | `cloudnative-pg`, `keda`, `metrics-server`, `envoy-gateway`, `argo-rollouts`, `plugin-barman-cloud` (k3s) | operators and their CRDs and webhooks |
 | -1 | `cluster-config`: Gateway, monitoring routes, Probe, node alerts (k3s) ([k8s/cluster](../k8s/cluster)), `prometheus-blackbox-exporter` | need the Gateway and Probe CRDs |
-| 0 | `storefront` (`overlays/kind-gitops` or `overlays/k3s`) | needs CloudNativePG, KEDA, the Gateway and the monitoring CRDs |
+| 0 | `storefront` (`overlays/kind-gitops` or `overlays/k3s`) | needs CloudNativePG, KEDA, the Gateway, Argo Rollouts and the monitoring CRDs |
 
 Chart versions and values files are in [k8s/platform/values.yaml](../k8s/platform/values.yaml), with per-cluster
 overrides in `values-kind.yaml` and `values-k3s.yaml`. The Alertmanager config, Slack template, logger script and
@@ -106,14 +106,88 @@ The UI is at `https://localhost:8081` (user `admin`). Or from the command line:
 
 Every app self-heals, so a `kubectl apply` or `kubectl set env` gets undone within minutes. Make changes in git. To
 try something before merging, push a branch and point the cluster at it with `REVISION=<branch> bash
-scripts/argocd-up.sh`, or turn off automated sync on that one Application. The storefront app doesn't prune, so a bad
-commit can't delete the database. Its project only reaches the storefront namespace, while `platform` can change
-anything: whoever can edit those Applications is a cluster admin. KEDA owns the API's replica count; Argo CD ignores
-that field.
+scripts/argocd-up.sh`, or turn off automated sync on that one Application. The storefront app prunes what leaves
+git, except the namespace, the Postgres Cluster and its backup store, which carry `Prune=false` so a bad commit can't
+delete the database. Its project only reaches the storefront namespace, while `platform` can change anything: whoever
+can edit those Applications is a cluster admin. KEDA owns the API's replica count and Argo Rollouts the HTTPRoute's
+weights; Argo CD ignores both.
 
 What isn't in git: the Secrets made from local files (Slack webhook URLs, S3 and Grafana Cloud credentials), until
 External Secrets in Phase 4b, and the root Application itself, which says which cluster this is. Argo CD doesn't
 manage its own installation either; `argocd-up.sh` applies the pinned upstream manifest.
+
+## Canary releases
+
+Every change to the API's pod template (a new image digest from the release workflow, an env var, a resource
+limit) goes out as a canary, judged by the SLIs and rolled back without anyone running kubectl.
+
+- **Argo Rollouts** (a platform app) runs the pods. The `Rollout` ([k8s/base/rollout.yaml](../k8s/base/rollout.yaml))
+  takes its pod template from the Deployment (`workloadRef`), which stays at 0 replicas, so overlays and scripts
+  still patch a Deployment, and the CI overlay, which has no Argo Rollouts, runs the Deployment directly.
+- **Steps:** 20% of the Gateway's traffic for 5 minutes, then 50% for 5 minutes, then all of it. The Gateway API
+  plugin sets the weights on the HTTPRoute's two backends, `storefront-api` (stable) and `storefront-api-canary`.
+  Only traffic through the Gateway is split: in-cluster callers of the Service reach the stable version only, which
+  is why the k6 Job now goes through the Gateway.
+- **Analysis**, once a minute from the 20% step on: the canary's checkout and catalog 5xx ratios, as burn rates
+  against the SLO budgets ([prometheus/rules/canary.yml](../prometheus/rules/canary.yml), grouped by the pods'
+  `rollouts-pod-template-hash` label, which the PodMonitor copies onto every series). A burn rate over 6 (the
+  slow-burn page threshold, 3% errors for checkout) aborts: traffic goes back to stable and the canary pods are
+  removed. Payment declines (402) aren't counted: they come from the payment provider and hit both versions alike.
+- **No verdict** before the canary has served 50 requests of a kind: the check returns 0 and passes, but only while
+  Prometheus is scraping a canary pod. If Prometheus can't see the canary at all, the check errors, and 4 errors in
+  a row abort. A release that arrives while nobody is shopping is promoted unjudged; the SLO alerts are the backstop.
+- **After an abort**, Argo CD shows the storefront Synced but Degraded: git still asks for the bad version. The fix is
+  a revert in git, which returns to the stable version instantly (its pods never stopped).
+
+### Experiment: a bad release (2026-10-31, kind)
+
+`BUG_MODE=true` makes 10% of checkouts fail with a 500. Shipped from a throwaway branch (`canary-exp`, an image built
+from this branch and loaded into the nodes) under k6 checkout-stress at 6 VUs, about 5,300 valid checkouts an hour,
+through the Gateway.
+
+| Time | |
+|------|-|
+| 20:40:40 | bad release pushed |
+| 20:41:25 | canary at 20%; analysis starts |
+| 20:42-20:44 | under 50 canary checkouts: no verdict (`[0]`), pass |
+| 20:45:27 | 50 checkouts reached: burn rate 21.7, over 6, failed |
+| 20:45:41 | rollout aborted, traffic back to 100% stable, canary pod removed 30 s later |
+| 20:46:43 | revert in git: Synced/Healthy |
+
+The stable version had 0 errors throughout, and no alert paged. Error budget spent:
+
+| | Failed checkouts | Share of the 28-day budget (~17,700 at this traffic) |
+|---|---|---|
+| Canary, actual | 8.5 (of 84.5 the canary served) | 0.05% |
+| Full rollout, the same 6 minutes | ~53 | 0.3% |
+| Full rollout until the fast-burn page (~43 min at 10% errors) | ~377 | 2.1% |
+
+So the canary cost about a sixth of the same minutes at 100%, and about 2% of waiting for the page, before anyone
+had even started to respond. Detection took 4 minutes 16 seconds from the canary's first traffic, most of it waiting
+for 50 checkouts.
+
+The first attempt, an hour earlier, promoted the bad release, and that's how the analysis got its current shape:
+
+- kind overloaded: 10 VUs, a canary pod, and a stray pod from the Deployment (Argo CD reset its missing `replicas` to
+  1 whenever the template changed; it's 0 in git now). Postgres's primary restarted 9 times, and the canary's series
+  disappeared from Prometheus. The first analysis read an empty result as "too few requests" and passed every check.
+  Now it passes without a verdict only while `up == 1` for a canary pod.
+- Just after that attempt's good release was promoted, the new stable version threw about 95 database errors
+  (`CannotCreateTransactionException`, on every route) in 8 minutes. Had that landed during a canary, the analysis would have failed
+  a good release: it judges the canary's errors in absolute terms. Comparing the canary with stable over the same
+  minutes would tell a bad release from a bad database. Not done yet.
+
+Other things that took a few tries, each with a comment where it's fixed:
+
+- **The ServiceMonitor became a PodMonitor.** Argo Rollouts narrows each Service's selector to one version, so a
+  Service-based scrape loses the other one. The old ServiceMonitor also matched the new canary Service, and with
+  pruning off it stayed behind and scraped the stable pods twice; the storefront app prunes now.
+- **No RespectIgnoreDifferences.** It copies ignored live fields into the sync with a merge patch, which replaces a
+  whole list: the HTTPRoute kept its live one-backend list, the canary backend never arrived, and the plugin failed
+  ("backendRef was not found"). `ApplyOutOfSyncOnly` leaves a route that differs only in weights alone instead.
+- **Don't change the Deployment's template when introducing the Rollout.** A template change starts the
+  Deployment's own rolling update next to the Rollout's new pods; on kind, 7 JVMs starting at once took Postgres down.
+- **More 60-second leases on kind:** Argo Rollouts and Envoy Gateway (30 restarts in an afternoon), like the others.
 
 ## Local smoke and security checks
 

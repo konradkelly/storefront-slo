@@ -15,6 +15,12 @@ spec:
         - path: { type: PathPrefix, value: /products }
         - path: { type: PathPrefix, value: /cart }
         - path: { type: PathPrefix, value: /orders }
+      # Stable and canary (rollout.yaml). Argo Rollouts' Gateway API plugin moves the weights during a release, and
+      # Argo CD leaves them alone (k8s/platform/templates/storefront.yaml). Between releases it's 100/0.
       backendRefs:
         - name: storefront-api
           port: 8080
+          weight: 100
+        - name: storefront-api-canary
+          port: 8080
+          weight: 0

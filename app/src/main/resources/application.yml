@@ -61,3 +61,6 @@ storefront:
   payment:
     failure-rate: ${PAYMENT_FAILURE_RATE:0.001}
     latency-ms: ${PAYMENT_LATENCY_MS:150}
+  # A deliberately bad release, for the canary experiment (docs/ROADMAP.md, Phase 3.3): when true, 10% of checkouts
+  # fail with a 500 before doing anything. Argo Rollouts' analysis should abort the release at 20% of traffic.
+  bug-mode: ${BUG_MODE:false}

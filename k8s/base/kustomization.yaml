@@ -9,14 +9,16 @@ resources:
   - namespace.yaml
   - postgres.yaml
   - storefront-api.yaml
+  - rollout.yaml
   - pdb.yaml
   - autoscaling.yaml
   - networkpolicy.yaml
   - httproute.yaml
-  - servicemonitor.yaml
+  - podmonitor.yaml
   # Generated from prometheus/rules/ by scripts/gen-k8s-rules.sh. Edit the source, not these.
   - slo-rules.yaml
   - slo-alerts.yaml
+  - canary-rules.yaml
 
 # Added to every resource's metadata, but not to selectors (changing a Deployment's selector forces a
 # delete-and-recreate).

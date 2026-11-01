@@ -1,5 +1,7 @@
-# The storefront app, last: it needs CloudNativePG, KEDA, the Gateway and the monitoring CRDs. Its project only
-# reaches the storefront namespace, and pruning stays off so a bad commit can't delete the database.
+# The storefront app, last: it needs CloudNativePG, KEDA, the Gateway, Argo Rollouts and the monitoring CRDs. Its
+# project only reaches the storefront namespace. Argo CD prunes what leaves git (the ServiceMonitor that the PodMonitor
+# replaced had to go, or the stable pods were scraped twice), except the namespace, the Postgres Cluster and its backup
+# store, which carry Prune=false so a bad commit can't delete the database.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -36,16 +38,36 @@ spec:
   syncPolicy:
     automated:
       selfHeal: true
-      # Keep database/namespace deletion out of unattended reconciliation.
-      prune: false
+      prune: true
     syncOptions:
       - CreateNamespace=true
-      - RespectIgnoreDifferences=true
+      # A sync applies only what differs from git, so a resource whose only differences are ignored below isn't
+      # applied, and keeps what the other controllers set. Not RespectIgnoreDifferences: it copies the live values in
+      # with a merge patch, which replaces a whole list, so the HTTPRoute's backendRefs kept the live (one backend)
+      # list and git's canary backend never arrived.
+      - ApplyOutOfSyncOnly=true
+  # Fields other controllers own.
   ignoreDifferences:
-    # KEDA owns the Deployment count; Argo CD must not reset it during sync.
+    # git says 0, and the Rollout scales an older Deployment's pods down to 0 itself (k8s/base/rollout.yaml).
     - group: apps
       kind: Deployment
       name: storefront-api
       namespace: storefront
       jsonPointers:
         - /spec/replicas
+    # KEDA owns the Rollout's count. git's value applies only when the Rollout itself changes in git, and KEDA then
+    # scales it back.
+    - group: argoproj.io
+      kind: Rollout
+      name: storefront-api
+      namespace: storefront
+      jsonPointers:
+        - /spec/replicas
+    # Argo Rollouts moves traffic between stable and canary here during a release, and sets it again on every
+    # reconcile, so a sync that resets the weights (the route changed in git) is corrected within seconds.
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: storefront-api
+      namespace: storefront
+      jqPathExpressions:
+        - .spec.rules[].backendRefs[].weight

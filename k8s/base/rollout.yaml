@@ -1,0 +1,117 @@
+# Releases of storefront-api go out as a canary (Argo Rollouts, installed by Argo CD from k8s/platform). The new
+# version first gets 20% of the Gateway's traffic, then 50%, then all of it, five minutes per step. All the while an
+# analysis compares the new version's own error ratios against the SLO budgets, and if they're over, the Rollout
+# aborts: traffic goes back to the old version and the new pods are removed, without anyone running kubectl. The
+# fix is then a revert in git, like any other bad commit.
+#
+# The pod template stays in the Deployment (storefront-api.yaml). This Rollout points at it (workloadRef) and scales
+# it to 0, so overlays, the soak drill and the fault experiments still patch a Deployment, and every change to its
+# template becomes a canary. The CI overlay has no Argo Rollouts and runs the Deployment as it is.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: storefront-api
+  namespace: storefront
+spec:
+  # The starting count (minimum one per zone). KEDA owns it after that (autoscaling.yaml), and Argo CD ignores it
+  # (k8s/platform/templates/storefront.yaml). Without it the Rollout would start at 1 replica.
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: storefront-api
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: storefront-api
+    scaleDown: progressively # hand over from the Deployment's pods as the Rollout's become ready
+  strategy:
+    canary:
+      # Rollouts adds the pod-template hash of each version to these Services' selectors, and the Gateway API plugin
+      # sets the HTTPRoute's weights between them (httproute.yaml). Traffic that doesn't come through the Gateway
+      # (in-cluster callers of the storefront-api Service) only ever reaches the stable version.
+      stableService: storefront-api
+      canaryService: storefront-api-canary
+      trafficRouting:
+        plugins:
+          argoproj-labs/gatewayAPI:
+            httpRoute: storefront-api
+            namespace: storefront
+      analysis:
+        # From the 20% step on: by then the canary pod is ready, so it's being scraped (see the template below).
+        startingStep: 1
+        templates:
+          - templateName: storefront-canary
+        args:
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+      steps:
+        - setWeight: 20
+        - pause: { duration: 5m }
+        - setWeight: 50
+        - pause: { duration: 5m }
+---
+# Runs for the rest of the canary, once a minute. Each check reads the canary recording rules
+# (prometheus/rules/canary.yml): the new version's own requests, told apart by their rollouts_pod_template_hash label
+# (podmonitor.yaml).
+#
+# What it judges: errors the code returns itself (5xx). Payment declines (402) aren't counted, unlike in the checkout
+# SLO: they come from the payment provider and hit both versions alike, so they say nothing about the release. That's
+# also what lets the soak drill and k3s-fault.sh raise PAYMENT_FAILURE_RATE through a canary.
+#
+# Fails when the canary burns its budget more than 6 times as fast as the SLO allows: the rate at which the slow-burn
+# alerts page (prometheus/rules/slo-alerts.yml). For checkout that's 3% errors. A single failed check aborts: the
+# 5-minute window already smooths out single requests.
+#
+# Each query returns one of three things:
+#   - the burn rate, once the canary has served 50 requests of that kind
+#   - 0 (pass) before that, as long as Prometheus is scraping a canary pod (up == 1). With few requests, one failure is
+#     already a high ratio (1 in 20 is 5%), and on an idle cluster every release would stall. The cost: a release that
+#     arrives while nobody is shopping is promoted unjudged, and only the SLO alerts catch it later.
+#   - nothing, when Prometheus can't see the canary at all. result[0] is then an error, and 4 errors in a row abort the
+#     release: if it can't be checked, it doesn't go out. The first version passed on nothing, and on 2026-10-31 it
+#     promoted the BUG_MODE release while an overloaded kind cluster had stopped scraping (docs/delivery.md).
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: storefront-canary
+  namespace: storefront
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    - name: checkout-error-burn-rate
+      interval: 1m
+      failureLimit: 0
+      consecutiveErrorLimit: 4
+      successCondition: result[0] <= 6
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc:9090
+          query: |
+            (
+              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
+                / scalar(1 - slo:checkout_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="{{args.canary-hash}}"} == 1) * 0
+    - name: catalog-error-burn-rate
+      interval: 1m
+      failureLimit: 0
+      consecutiveErrorLimit: 4
+      successCondition: result[0] <= 6
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc:9090
+          query: |
+            (
+              slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
+                / scalar(1 - slo:catalog_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="{{args.canary-hash}}"} == 1) * 0

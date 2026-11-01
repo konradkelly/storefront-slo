@@ -6,6 +6,10 @@ kind: PodDisruptionBudget
 metadata:
   name: storefront-api
   namespace: storefront
+  annotations:
+    # kube-linter compares minAvailable with the Deployment's replicas, 0. The Rollout runs the pods (rollout.yaml),
+    # at least 3.
+    ignore-check.kube-linter.io/pdb-min-available: "the Rollout runs the pods; the Deployment is its template"
 spec:
   minAvailable: 2
   selector:

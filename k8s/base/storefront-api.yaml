@@ -1,12 +1,17 @@
+# The pod template. On kind and k3s the Rollout (rollout.yaml) runs the pods from it as a canary and keeps this
+# Deployment at 0 replicas; the CI overlay, which has no Argo Rollouts, runs it directly.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: storefront-api
   namespace: storefront
 spec:
-  # No `replicas`: the KEDA ScaledObject (autoscaling.yaml) owns the count, at least 3 (one per zone). The
-  # PodDisruptionBudget (pdb.yaml) keeps at least 2 serving during drains. Never re-add `replicas` here:
-  # every `kubectl apply` would reset the count and fight the autoscaler.
+  # 0: the Rollout runs the pods. It has to be in git: when this template changes, Argo CD's apply resets a missing
+  # replicas field to the default of 1, and on 2026-10-31 that started a stray pod next to every canary. Argo CD
+  # ignores a difference here (k8s/platform/templates/storefront.yaml), so on a cluster that ran this Deployment
+  # before the Rollout existed, the Rollout still scales the old pods down one by one as its own become ready. The KEDA
+  # ScaledObject (autoscaling.yaml) owns the Rollout's count, at least 3 (one per zone). The CI overlay sets 1.
+  replicas: 0
   strategy:
     rollingUpdate:
       maxSurge: 1        # start one new pod at a time...
@@ -20,7 +25,10 @@ spec:
         app: storefront-api
     spec:
       # Spread across zones (hard rule) and nodes (soft). pod-template-hash makes each rollout's new ReplicaSet
-      # spread on its own instead of counting the old pods that are about to go away.
+      # spread on its own instead of counting the old pods that are about to go away. Pods the Rollout runs don't
+      # have that label (theirs is rollouts-pod-template-hash), so they spread as one group: a canary's 1-2 pods
+      # still fit. It stays this way because changing the template here starts a rolling update of the Deployment
+      # next to the Rollout's pods: on kind, 7 JVMs starting at once took down Postgres (2026-10-31).
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -124,10 +132,27 @@ spec:
             limits:
               memory: 768Mi
 ---
+# The Service in-cluster callers use. During a canary, Argo Rollouts narrows its selector to the stable version and
+# points storefront-api-canary at the new one, and the Gateway splits traffic between the two (httproute.yaml).
 apiVersion: v1
 kind: Service
 metadata:
   name: storefront-api
+  namespace: storefront
+  labels:
+    app: storefront-api
+spec:
+  selector:
+    app: storefront-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storefront-api-canary
   namespace: storefront
   labels:
     app: storefront-api
