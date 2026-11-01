@@ -6,9 +6,12 @@ metadata:
   name: storefront-api
   namespace: storefront
 spec:
-  # No `replicas`: the Rollout scales this to 0, and Argo CD ignores the field (k8s/platform/templates/storefront.yaml).
-  # The KEDA ScaledObject (autoscaling.yaml) owns the Rollout's count, at least 3 (one per zone). The
-  # PodDisruptionBudget (pdb.yaml) keeps at least 2 serving during drains.
+  # 0: the Rollout runs the pods. It has to be in git: when this template changes, Argo CD's apply resets a missing
+  # replicas field to the default of 1, and on 2026-10-31 that started a stray pod next to every canary. Argo CD
+  # ignores a difference here (k8s/platform/templates/storefront.yaml), so on a cluster that ran this Deployment
+  # before the Rollout existed, the Rollout still scales the old pods down one by one as its own become ready. The KEDA
+  # ScaledObject (autoscaling.yaml) owns the Rollout's count, at least 3 (one per zone). The CI overlay sets 1.
+  replicas: 0
   strategy:
     rollingUpdate:
       maxSurge: 1        # start one new pod at a time...

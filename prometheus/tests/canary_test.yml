@@ -28,6 +28,8 @@ tests:
         values: '0+40x30'
       - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="400"}'
         values: '0+40x30'
+      - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
+        values: '1x30'
     promql_expr_test:
       - expr: slo_canary:checkout_errors:ratio_rate5m
         eval_time: 20m
@@ -46,32 +48,64 @@ tests:
             value: 500
       # The analysis query (k8s/base/rollout.yaml) for the canary: 10% errors against a 0.5% budget is a burn rate
       # of 20, over its limit of 6. 1 - 0.995 isn't exact in floating point (19.999999999999982), so check it's
-      # within 1e-9.
+      # within 1e-9. The `or` adds nothing: the burn rate already has this version's labels.
       - expr: |
           abs((
-            slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-              / scalar(1 - slo:checkout_availability:objective)
-            and on(rollouts_pod_template_hash)
-            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+            (
+              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
+                / scalar(1 - slo:checkout_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
           ) - 20) < bool 1e-9
         eval_time: 20m
         exp_samples:
           - labels: '{rollouts_pod_template_hash="bbb"}'
             value: 1
 
-  # A canary that has served only a few checkouts gets no verdict: the analysis query returns nothing, which passes.
+  # A canary that has served only a few checkouts gets no verdict: 0, which passes, as long as Prometheus is scraping
+  # it.
   - interval: 1m
     input_series:
       - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="201"}'
         values: '0+4x30'
       - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="500"}'
         values: '0+1x30'
+      - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
+        values: '1x30'
     promql_expr_test:
       - expr: |
-          slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-            / scalar(1 - slo:checkout_availability:objective)
-          and on(rollouts_pod_template_hash)
-          slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+          (
+            slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
+              / scalar(1 - slo:checkout_availability:objective)
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+          )
+          or on(rollouts_pod_template_hash)
+          max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 0
+
+  # Prometheus can't see the canary: its scrapes fail (up 0) and its request series are gone. The query returns nothing,
+  # which the analysis counts as an error, and 4 in a row abort the release.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
+        values: '0x30'
+    promql_expr_test:
+      - expr: |
+          (
+            slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
+              / scalar(1 - slo:checkout_availability:objective)
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+          )
+          or on(rollouts_pod_template_hash)
+          max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
         eval_time: 20m
         exp_samples: []
 

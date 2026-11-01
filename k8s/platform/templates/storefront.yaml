@@ -48,7 +48,7 @@ spec:
       - ApplyOutOfSyncOnly=true
   # Fields other controllers own.
   ignoreDifferences:
-    # The Rollout keeps the Deployment at 0 (k8s/base/rollout.yaml).
+    # git says 0, and the Rollout scales an older Deployment's pods down to 0 itself (k8s/base/rollout.yaml).
     - group: apps
       kind: Deployment
       name: storefront-api

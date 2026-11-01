@@ -38,6 +38,8 @@ spec:
             httpRoute: storefront-api
             namespace: storefront
       analysis:
+        # From the 20% step on: by then the canary pod is ready, so it's being scraped (see the template below).
+        startingStep: 1
         templates:
           - templateName: storefront-canary
         args:
@@ -50,7 +52,7 @@ spec:
         - setWeight: 50
         - pause: { duration: 5m }
 ---
-# Runs for the whole canary, once a minute. Each check reads the canary recording rules
+# Runs for the rest of the canary, once a minute. Each check reads the canary recording rules
 # (prometheus/rules/canary.yml): the new version's own requests, told apart by their rollouts_pod_template_hash label
 # (podmonitor.yaml).
 #
@@ -62,9 +64,14 @@ spec:
 # alerts page (prometheus/rules/slo-alerts.yml). For checkout that's 3% errors. A single failed check aborts: the
 # 5-minute window already smooths out single requests.
 #
-# Before the canary has served 50 requests of a kind, that check returns nothing and passes. With few requests, one
-# failure is already a high ratio (1 in 20 is 5%), and on an idle cluster every release would stall. The cost: a
-# release that arrives while nobody is shopping is promoted unjudged, and only the SLO alerts catch it later.
+# Each query returns one of three things:
+#   - the burn rate, once the canary has served 50 requests of that kind
+#   - 0 (pass) before that, as long as Prometheus is scraping a canary pod (up == 1). With few requests, one failure is
+#     already a high ratio (1 in 20 is 5%), and on an idle cluster every release would stall. The cost: a release that
+#     arrives while nobody is shopping is promoted unjudged, and only the SLO alerts catch it later.
+#   - nothing, when Prometheus can't see the canary at all. result[0] is then an error, and 4 errors in a row abort the
+#     release: if it can't be checked, it doesn't go out. The first version passed on nothing, and on 2026-10-31 it
+#     promoted the BUG_MODE release while an overloaded kind cluster had stopped scraping (docs/delivery.md).
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
@@ -77,24 +84,34 @@ spec:
     - name: checkout-error-burn-rate
       interval: 1m
       failureLimit: 0
-      successCondition: len(result) == 0 || result[0] <= 6
+      consecutiveErrorLimit: 4
+      successCondition: result[0] <= 6
       provider:
         prometheus:
           address: http://prometheus-operated.monitoring.svc:9090
           query: |
-            slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
-              / scalar(1 - slo:checkout_availability:objective)
-            and on(rollouts_pod_template_hash)
-            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            (
+              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
+                / scalar(1 - slo:checkout_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="{{args.canary-hash}}"} == 1) * 0
     - name: catalog-error-burn-rate
       interval: 1m
       failureLimit: 0
-      successCondition: len(result) == 0 || result[0] <= 6
+      consecutiveErrorLimit: 4
+      successCondition: result[0] <= 6
       provider:
         prometheus:
           address: http://prometheus-operated.monitoring.svc:9090
           query: |
-            slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
-              / scalar(1 - slo:catalog_availability:objective)
-            and on(rollouts_pod_template_hash)
-            slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            (
+              slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
+                / scalar(1 - slo:catalog_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="{{args.canary-hash}}"} == 1) * 0
