@@ -4,8 +4,8 @@ The storefront on a cloud cluster you run yourself: one k3s server and two agent
 us-east-1, with the same platform, SLO rules, dashboards and Argo CD delivery as kind.
 
 ```
-terraform/aws/bootstrap   once: state bucket, budget alert, GitHub OIDC role   (~$0/month, kept)
-terraform/aws/k3s         make up / make down: VPC, nodes, IAM, backup bucket   (~$0.15/hr while up)
+terraform/aws/bootstrap   once: state and backup buckets, budget alert, GitHub OIDC role   (~$0/month, kept)
+terraform/aws/k3s         make up / make down: VPC, nodes, IAM                  (~$0.15/hr while up)
 k8s/overlays/k3s          what Argo CD deploys: base + S3 backups + GHCR image
 scripts/k3s-up.sh         terraform apply → kubeconfig → Secrets → Argo CD, which installs the rest (k8s/platform)
 ```
@@ -28,7 +28,7 @@ scripts/k3s-up.sh         terraform apply → kubeconfig → Secrets → Argo CD
 
 ```bash
 make up      # ~10 min from nothing; rerun any time (also after your IP changes)
-make down    # back to $0/day
+make down    # about $0/day; the database's backups stay, and the next make up restores them
 ```
 
 `make up` prints the URLs. The API (6443) and HTTP (80) are open to your current IP only, SSH is closed, and a node
@@ -68,9 +68,9 @@ latency, checkouts, pool usage, restarts, node memory/disk/CPU, and Postgres arc
 the free tier), are labeled `cluster="k3s-aws"`, and the committed dashboards import directly. Screenshot or
 link them in write-ups before they age out.
 
-The database survives the instances being replaced, but not `make down`. Terraform replaces all three instances when
-their boot script changes, and their volumes go with them, while the backup bucket stays. When `make up` then makes
-a new database and finds a completed base backup in the bucket, it restores from it instead of starting empty:
+The database survives `make down`, the nightly destroy and Terraform replacing the instances. Their volumes go, but
+its backups are in a bucket owned by `terraform/aws/bootstrap`, which none of those touch. When `make up` makes a new
+database and finds a completed base backup in the bucket, it restores from it instead of starting empty:
 
 1. It moves the archive from `storefront-db/` to `storefront-db-previous/` (copy, then delete). A new database only
    archives into an empty folder: on 2026-10-31 a new database couldn't archive at all ("Expected empty archive")
@@ -78,8 +78,15 @@ a new database and finds a completed base backup in the bucket, it restores from
 2. It points Argo CD at [k8s/overlays/k3s-restore](../k8s/overlays/k3s-restore), which bootstraps the Cluster by
    recovery from `storefront-db-previous`: the latest base backup plus every archived WAL segment after it.
 
+The instances are destroyed without warning, so the restored database is as of its last archived WAL segment.
+Postgres closes one at least every 5 minutes (`archive_timeout`), which puts the most you can lose at about 5 minutes
+of writes.
+
 On a rerun with the database already there, it keeps whichever overlay the database was created with. WAL with no base
-backup to replay it onto is deleted. `make down` deletes the bucket, so the next `make up` starts empty.
+backup to replay it onto is deleted.
+
+To start with an empty database instead, run `make wipe-db` after `make down`. It deletes the database's backups and
+leaves the Grafana snapshots.
 
 ## How long to run it
 

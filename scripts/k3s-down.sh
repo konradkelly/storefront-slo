@@ -1,6 +1,7 @@
 #!/bin/bash
-# Destroys the k3s environment: instances, Elastic IP, VPC, IAM, parameters and the backup bucket with its contents.
-# The account is back to $0/day afterwards. terraform/aws/bootstrap (state bucket, budget, CI role) is kept.
+# Destroys the k3s environment: instances, Elastic IP, VPC, IAM and parameters. terraform/aws/bootstrap (state bucket,
+# backup bucket, budget, CI role) is kept, so the account costs about $0/day afterwards and the next `make up` restores
+# the database. `make wipe-db` starts it empty instead.
 #   bash scripts/k3s-down.sh      (or: make down)
 #
 # Also run nightly by .github/workflows/k3s-nightly-destroy.yml, with the same Terraform commands.
@@ -10,7 +11,7 @@ cd "$(dirname "$0")/.."
 tf() { terraform -chdir=terraform/aws/k3s "$@"; }
 account=$(aws sts get-caller-identity --query Account --output text)
 tf init -input=false -reconfigure -backend-config="bucket=storefront-pulse-tfstate-$account" >/dev/null
-# The bucket goes with the environment, so keep the dashboard pictures (k8s/monitoring/grafana-snapshots.yaml).
+# A local copy of the dashboard pictures (k8s/monitoring/grafana-snapshots.yaml).
 aws s3 sync "s3://storefront-k3s-backups-$account/grafana-snapshots/" grafana-snapshots/ --no-progress >/dev/null &&
   echo "Grafana snapshots saved in grafana-snapshots/" || true
 tf destroy -input=false -auto-approve

@@ -1,5 +1,6 @@
-# Account-level pieces that outlive any cluster: the Terraform state bucket, the cost budget, and the role GitHub
-# Actions assumes (OIDC, no stored keys) for the nightly destroy. Applied once by hand; `make down` never touches it.
+# Account-level pieces that outlive any cluster: the Terraform state bucket, the database's backup bucket, the cost
+# budget, and the role GitHub Actions assumes (OIDC, no stored keys) for the nightly destroy. Applied once by hand;
+# `make down` never touches it.
 #
 # State for this stack is local (terraform.tfstate here, gitignored): it creates the bucket the other stacks keep
 # their state in. Losing it is recoverable with `terraform import`. Everything here costs ~$0 per month.
@@ -63,6 +64,32 @@ resource "aws_s3_bucket_lifecycle_configuration" "state" {
     status = "Enabled"
     filter {}
     noncurrent_version_expiration { noncurrent_days = 30 }
+  }
+}
+
+# --- Backups ---------------------------------------------------------------------------------------------------------
+
+# Postgres base backups and WAL archive (CloudNativePG + Barman Cloud plugin, k8s/overlays/k3s/backups.yaml) and the
+# Grafana snapshots. Here and not in terraform/aws/k3s so they outlive `make down` and the nightly destroy: the next
+# `make up` restores the database from this archive (docs/k3s.md). No force_destroy, so destroying this stack fails
+# while the bucket holds anything. `make wipe-db` is how to start with an empty database.
+resource "aws_s3_bucket" "backups" {
+  # Must match destinationPath in k8s/overlays/k3s/backups.yaml.
+  bucket = "storefront-k3s-backups-${local.account_id}"
+}
+
+resource "aws_s3_bucket_public_access_block" "backups" {
+  bucket                  = aws_s3_bucket.backups.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule {
+    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
   }
 }
 
@@ -173,10 +200,12 @@ data "aws_iam_policy_document" "github_k3s" {
       "arn:aws:iam::${local.account_id}:policy/storefront-k3s-*",
     ]
   }
+  # Read only, so CI can't delete the database's backups. The nightly destroy doesn't touch this bucket, and the
+  # workflow only downloads the Grafana snapshots from it.
   statement {
-    sid       = "StackBuckets"
-    actions   = ["s3:Get*", "s3:List*", "s3:DeleteObject*", "s3:DeleteBucket*", "s3:PutBucket*"]
-    resources = ["arn:aws:s3:::storefront-k3s-*", "arn:aws:s3:::storefront-k3s-*/*"]
+    sid       = "ReadBackups"
+    actions   = ["s3:Get*", "s3:List*"]
+    resources = [aws_s3_bucket.backups.arn, "${aws_s3_bucket.backups.arn}/*"]
   }
   statement {
     sid       = "StackParameters"

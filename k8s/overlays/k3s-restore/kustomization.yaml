@@ -1,7 +1,7 @@
 # k3s, with a database restored from S3 instead of created empty. scripts/k3s-up.sh picks this overlay when it makes a
-# new database while the bucket still holds the previous one's archive (the instances were replaced, so the old
-# volumes are gone). It first moves that archive from storefront-db/ to storefront-db-previous/, because a new
-# database only archives into an empty folder ("Expected empty archive"). See docs/k3s.md.
+# new database while the bucket holds the previous one's archive (the bucket outlives make down, and the old volumes
+# don't). It first moves that archive from storefront-db/ to storefront-db-previous/, because a new database only
+# archives into an empty folder ("Expected empty archive"). See docs/k3s.md.
 #
 # Recovery replays every archived WAL segment after the latest base backup, so the database comes back as of its last
 # archived transaction. Bootstrap only runs when the Cluster is created; after that this overlay is k3s's, and

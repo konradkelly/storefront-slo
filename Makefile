@@ -3,11 +3,12 @@
 
 SHELL := bash
 
-.PHONY: help up down plan keep unkeep kind-up argocd-kind
+.PHONY: help up down plan wipe-db keep unkeep kind-up argocd-kind
 
 help:
 	@echo "make up            k3s on EC2 (Phase 4a): terraform apply, then Argo CD installs the rest. Costs ~\$$0.15/hr."
-	@echo "make down          destroy the k3s environment (back to \$$0/day)"
+	@echo "make down          destroy the k3s environment (about \$$0/day; the database's backups stay)"
+	@echo "make wipe-db       delete the database's backups, so the next make up starts empty"
 	@echo "make plan          terraform plan for the k3s environment, no changes"
 	@echo "make keep HOURS=72 skip the nightly destroy until then (a soak run; max 7 days)"
 	@echo "make unkeep        nightly destroy applies again"
@@ -24,6 +25,9 @@ plan:
 	terraform -chdir=terraform/aws/k3s init -input=false -reconfigure \
 	  -backend-config="bucket=storefront-pulse-tfstate-$$(aws sts get-caller-identity --query Account --output text)" >/dev/null
 	terraform -chdir=terraform/aws/k3s plan -input=false
+
+wipe-db:
+	bash scripts/k3s-wipe-db.sh
 
 # The nightly destroy (.github/workflows/k3s-nightly-destroy.yml) skips while K3S_KEEP_UNTIL is in the future.
 keep:

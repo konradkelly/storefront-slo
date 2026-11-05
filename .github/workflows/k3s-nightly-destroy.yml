@@ -77,7 +77,7 @@ jobs:
           terraform init -input=false -backend-config="bucket=storefront-pulse-tfstate-$account"
       - name: Show what is running
         run: terraform state list || true
-      # The bucket goes with the environment, so keep the dashboard pictures (k8s/monitoring/grafana-snapshots.yaml).
+      # A copy of the dashboard pictures you can open without AWS (k8s/monitoring/grafana-snapshots.yaml).
       - name: Download Grafana snapshots
         working-directory: .
         run: |

@@ -6,8 +6,8 @@
 #   bash scripts/k3s-up.sh        (or: make up)
 #
 # COSTS MONEY while it exists: 3 x t3.medium + 3 public IPv4 + 90 GB gp3 ≈ $0.15/hr ≈ $3.60/day.
-# `make down` (scripts/k3s-down.sh) returns the account to $0/day, and .github/workflows/k3s-nightly-destroy.yml
-# runs it every night in case you forget.
+# `make down` (scripts/k3s-down.sh) stops that, and .github/workflows/k3s-nightly-destroy.yml runs it every night in
+# case you forget. Only the backup bucket stays, at under a cent a month.
 #
 # Needs: terraform >= 1.10, aws CLI (logged in), kubectl, curl.
 set -euo pipefail
@@ -18,8 +18,11 @@ export KUBECONFIG="$HOME/.kube/storefront-k3s.yaml" # its own file: never merged
 source scripts/lib/bootstrap.sh # k(), step(), the Slack Secret
 tf() { terraform -chdir=terraform/aws/k3s "$@"; }
 
-step "Terraform: VPC, security group, IAM, 1 server + 2 agents, backup bucket"
+step "Terraform: VPC, security group, IAM, 1 server + 2 agents"
 account=$(aws sts get-caller-identity --query Account --output text)
+bucket="storefront-k3s-backups-$account"
+aws s3api head-bucket --bucket "$bucket" 2>/dev/null || {
+  echo "No bucket $bucket: apply terraform/aws/bootstrap first (docs/k3s.md)"; exit 1; }
 tf init -input=false -reconfigure -backend-config="bucket=storefront-pulse-tfstate-$account" >/dev/null
 my_ip=$(curl -sf https://checkip.amazonaws.com | tr -d '[:space:]')
 echo "Kubernetes API and HTTP open to $my_ip/32 only"
@@ -75,17 +78,16 @@ creds=$(mktemp)
   echo "AWS_REGION=$region"
 } > "$creds")
 k -n storefront create secret generic storefront-backup-s3 --from-env-file="$creds" --dry-run=client -o yaml | k apply -f -
-echo "BUCKET=$(tf output -raw backup_bucket)" >> "$creds" # kubectl 1.36 refuses --from-env-file with --from-literal
+echo "BUCKET=$bucket" >> "$creds" # kubectl 1.36 refuses --from-env-file with --from-literal
 k -n monitoring create secret generic grafana-snapshots-s3 --from-env-file="$creds" --dry-run=client -o yaml | k apply -f -
 rm -f "$creds"
 
 step "Database: new, restored from S3, or the one already running"
-# The bucket outlives the instances when Terraform replaces them (a changed boot script), and their volumes don't. So
-# a new database may find the previous one's archive. It restores from it (k8s/overlays/k3s-restore), and since a
+# The bucket outlives the instances (make down, the nightly destroy, a changed boot script), and their volumes don't. So
+# a new database usually finds the previous one's archive. It restores from it (k8s/overlays/k3s-restore), and since a
 # database only archives into an empty folder, the archive moves from storefront-db/ to storefront-db-previous/ first.
 # The move copies everything before deleting anything, and deletes the backup.info files first, so a rerun after an
 # interruption never mistakes a half-moved archive for a complete one.
-bucket=$(tf output -raw backup_bucket)
 archive="s3://$bucket/storefront-db"
 has_base_backup() { # a completed base backup in this archive folder
   local f

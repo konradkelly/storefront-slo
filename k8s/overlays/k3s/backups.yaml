@@ -17,7 +17,7 @@ metadata:
     argocd.argoproj.io/sync-options: Prune=false
 spec:
   configuration:
-    # Bucket created by terraform/aws/k3s/backups.tf (the name includes the account ID).
+    # Bucket created by terraform/aws/bootstrap (the name includes the account ID).
     destinationPath: s3://storefront-k3s-backups-675901257165/storefront-db
     s3Credentials:
       accessKeyId:

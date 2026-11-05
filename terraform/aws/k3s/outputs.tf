@@ -19,10 +19,6 @@ output "kubeconfig_parameter" {
   value = aws_ssm_parameter.kubeconfig.name
 }
 
-output "backup_bucket" {
-  value = aws_s3_bucket.backups.bucket
-}
-
 output "backup_access_key_id" {
   value = aws_iam_access_key.backup.id
 }

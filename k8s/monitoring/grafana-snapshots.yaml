@@ -1,7 +1,7 @@
 # k3s only (k8s/cluster/k3s). Every hour, renders the SLO and API dashboards through Grafana's image
 # renderer (kps-values-k3s.yaml) and copies the PNGs to the backup bucket under grafana-snapshots/. Pictures of a
-# soak run outlive the cluster: scripts/k3s-down.sh downloads them to grafana-snapshots/, and the nightly destroy
-# saves them as a workflow artifact, before the bucket is deleted.
+# soak run outlive the cluster: they stay in the bucket, scripts/k3s-down.sh downloads them to grafana-snapshots/, and
+# the nightly destroy saves them as a workflow artifact.
 #
 # Ranges: 6h and 24h every hour, plus 3d at 00, 06, 12 and 18 UTC. An extra set at a moment that matters, which
 # also renders 3d: kubectl -n monitoring create job --from=cronjob/grafana-snapshots snap-<event>
