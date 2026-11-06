@@ -11,7 +11,9 @@ RUN mvn -q package -DskipTests
 FROM eclipse-temurin:21.0.12.1_1-jre-noble
 # CVE-2026-109518 (HIGH) fails the release gate: the base image has apt 2.8.3, and the fix is 2.8.4ubuntu0.1. This does
 # nothing once the base image has the fix, and can go then.
-RUN apt-get update   && apt-get install --yes --no-install-recommends --only-upgrade apt libapt-pkg6.0t64   && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends --only-upgrade apt libapt-pkg6.0t64 \
+  && rm -rf /var/lib/apt/lists/*
 # Numeric UID so Kubernetes can verify runAsNonRoot without resolving a username.
 RUN useradd --system --uid 10001 --no-create-home storefront
 WORKDIR /app
