@@ -1,8 +1,8 @@
 # Releases of storefront-api go out as a canary (Argo Rollouts, installed by Argo CD from k8s/platform). The new
 # version first gets 20% of the Gateway's traffic, then 50%, then all of it, five minutes per step. All the while an
-# analysis compares the new version's own error ratios against the SLO budgets, and if they're over, the Rollout
-# aborts: traffic goes back to the old version and the new pods are removed, without anyone running kubectl. The
-# fix is then a revert in git, like any other bad commit.
+# analysis compares the new version's error ratios with the old version's over the same minutes. If the new version
+# burns the SLO budget much faster, the Rollout aborts: traffic goes back to the old version and the new pods are
+# removed, without anyone running kubectl. The fix is then a revert in git, like any other bad commit.
 #
 # The pod template stays in the Deployment (storefront-api.yaml). This Rollout points at it (workloadRef) and scales
 # it to 0, so overlays, the soak drill and the fault experiments still patch a Deployment, and every change to its
@@ -46,6 +46,9 @@ spec:
           - name: canary-hash
             valueFrom:
               podTemplateHashValue: Latest
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
       steps:
         - setWeight: 20
         - pause: { duration: 5m }
@@ -53,25 +56,36 @@ spec:
         - pause: { duration: 5m }
 ---
 # Runs for the rest of the canary, once a minute. Each check reads the canary recording rules
-# (prometheus/rules/canary.yml): the new version's own requests, told apart by their rollouts_pod_template_hash label
+# (prometheus/rules/canary.yml): each version's own requests, told apart by their rollouts_pod_template_hash label
 # (podmonitor.yaml).
 #
 # What it judges: errors the code returns itself (5xx). Payment declines (402) aren't counted, unlike in the checkout
 # SLO: they come from the payment provider and hit both versions alike, so they say nothing about the release. That's
 # also what lets the soak drill and k3s-fault.sh raise PAYMENT_FAILURE_RATE through a canary.
 #
-# Fails when the canary burns its budget more than 6 times as fast as the SLO allows: the rate at which the slow-burn
-# alerts page (prometheus/rules/slo-alerts.yml). For checkout that's 3% errors. A single failed check aborts: the
-# 5-minute window already smooths out single requests.
+# Two checks per SLI, both against a burn rate of 6, the rate at which the slow-burn alerts page
+# (prometheus/rules/slo-alerts.yml). For checkout that's 3% errors.
+#   - *-vs-stable: how much faster the canary burns than stable over the same 5 minutes. Over 6 aborts: the canary is
+#     worse than the version it replaces, so the release is to blame. A single failed check aborts: the 5-minute
+#     window already smooths out single requests.
+#   - *-burn-rate: the canary's own burn rate. Over 6 while stable is just as bad (a database outage, an overloaded
+#     cluster) is neither a pass nor a fail. The check is inconclusive, so the Rollout pauses: it doesn't blame a good
+#     release for an outage, and doesn't promote it into one either. Someone then runs `kubectl argo rollouts
+#     promote` or `abort` (docs/delivery.md). Until 2026-11-07 this check decided alone, and would have failed a good
+#     release during a database outage.
 #
 # Each query returns one of three things:
-#   - the burn rate, once the canary has served 50 requests of that kind
+#   - the burn rate (or how much faster than stable), once the canary has served 50 requests of that kind. Stable
+#     counts only with 50 requests too. With fewer, it counts as 0 errors, and the comparison becomes the canary's own
+#     burn rate.
 #   - 0 (pass) before that, as long as Prometheus is scraping a canary pod (up == 1). With few requests, one failure is
 #     already a high ratio (1 in 20 is 5%), and on an idle cluster every release would stall. The cost: a release that
 #     arrives while nobody is shopping is promoted unjudged, and only the SLO alerts catch it later.
 #   - nothing, when Prometheus can't see the canary at all. result[0] is then an error, and 4 errors in a row abort the
 #     release: if it can't be checked, it doesn't go out. The first version passed on nothing, and on 2026-10-31 it
 #     promoted the BUG_MODE release while an overloaded kind cluster had stopped scraping (docs/delivery.md).
+#
+# The same queries, with fixed hashes, are unit-tested in prometheus/tests/canary_test.yml.
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
@@ -80,12 +94,41 @@ metadata:
 spec:
   args:
     - name: canary-hash
+    - name: stable-hash
   metrics:
-    - name: checkout-error-burn-rate
+    - name: checkout-vs-stable
       interval: 1m
       failureLimit: 0
       consecutiveErrorLimit: 4
       successCondition: result[0] <= 6
+      failureCondition: result[0] > 6
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc:9090
+          query: |
+            (
+              (
+                slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
+                - scalar(
+                    max(
+                      slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.stable-hash}}"}
+                      and on(rollouts_pod_template_hash)
+                      slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="{{args.stable-hash}}"} >= 50
+                    )
+                    or vector(0)
+                  )
+              )
+              / scalar(1 - slo:checkout_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="{{args.canary-hash}}"} == 1) * 0
+    - name: checkout-burn-rate
+      interval: 1m
+      consecutiveErrorLimit: 4
+      successCondition: result[0] <= 6
+      failureCondition: result[0] < 0 # never: a burn rate isn't negative. Over 6 is inconclusive, see above
       provider:
         prometheus:
           address: http://prometheus-operated.monitoring.svc:9090
@@ -98,11 +141,39 @@ spec:
             )
             or on(rollouts_pod_template_hash)
             max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="{{args.canary-hash}}"} == 1) * 0
-    - name: catalog-error-burn-rate
+    - name: catalog-vs-stable
       interval: 1m
       failureLimit: 0
       consecutiveErrorLimit: 4
       successCondition: result[0] <= 6
+      failureCondition: result[0] > 6
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc:9090
+          query: |
+            (
+              (
+                slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
+                - scalar(
+                    max(
+                      slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.stable-hash}}"}
+                      and on(rollouts_pod_template_hash)
+                      slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="{{args.stable-hash}}"} >= 50
+                    )
+                    or vector(0)
+                  )
+              )
+              / scalar(1 - slo:catalog_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="{{args.canary-hash}}"} == 1) * 0
+    - name: catalog-burn-rate
+      interval: 1m
+      consecutiveErrorLimit: 4
+      successCondition: result[0] <= 6
+      failureCondition: result[0] < 0 # never: a burn rate isn't negative. Over 6 is inconclusive, see above
       provider:
         prometheus:
           address: http://prometheus-operated.monitoring.svc:9090
