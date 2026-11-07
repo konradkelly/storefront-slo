@@ -471,11 +471,10 @@ Run the system on a real cloud cluster that you operate yourself. k3s on EC2 cos
 and it makes you handle the parts EKS later takes over: the control plane, node identity, and storage.
 Keep a written list of each piece you had to run yourself, because Phase 4b is structured around that list.
 
-Built 2026-10-12, not yet applied: `terraform plan` passes against the real account (38 resources), and the
-manifests pass the CI schema and lint checks. The boxes get checked after the first real `make up`. How to run it,
-the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
+Built 2026-10-12, first applied 2026-10-24, and in use since. How to run it, the cost, and the "what I had to run
+myself" list are in [docs/k3s.md](k3s.md).
 
-- [ ] **Terraform foundation.** State in S3 with locking. Modules for a VPC, security groups, and EC2 instances:
+- [x] **Terraform foundation.** State in S3 with locking. Modules for a VPC, security groups, and EC2 instances:
       1 k3s server and 2 agents (t3.medium), installed through `user_data`. Use **SSM Session Manager**
       instead of SSH so port 22 stays closed. Expose the Kubernetes API only to your IP, or reach it
       through an SSM port-forward.
@@ -483,11 +482,12 @@ the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
       (one public subnet per zone, no NAT gateway, Amazon Linux 2023, k3s v1.34.12). The API and port 80 are open to
       your IP only (`make up` detects it), and SSH is closed. The server has an Elastic IP so the experiment's
       stop/start doesn't invalidate its certificate.
-- [ ] **Images.** Pull from **GHCR**, which Phase 3 already publishes to. Using GHCR avoids setting up the ECR
+- [x] **Images.** Pull from **GHCR**, which Phase 3 already publishes to. Using GHCR avoids setting up the ECR
       credential provider on self-managed nodes.
       Unblocked 2026-10-12: the first signed image (`sha256:0769ce23…`) is published, promoted into
       `overlays/k3s` by `scripts/promote-image.sh`, and pullable anonymously, so k3s needs no pull secret.
-- [ ] **Built-in k3s components.** k3s ships with Traefik, ServiceLB, and local-path storage. Decide whether
+      k3s has pulled every release since, most recently the 2026-11-07 apt fix (CVE-2026-109518).
+- [x] **Built-in k3s components.** k3s ships with Traefik, ServiceLB, and local-path storage. Decide whether
       to keep Traefik or disable it and install ingress-nginx for parity with kind. Also note that k3s
       **does** enforce NetworkPolicy through its embedded kube-router, unlike kind, so re-test the Phase 2 policies.
       Decided: Traefik and k3s's metrics-server are disabled. Envoy Gateway and the metrics-server chart come from
@@ -495,31 +495,39 @@ the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
       local-path stay. Nodes get zone labels from user_data: the API's zone spread uses `DoNotSchedule`, so without
       them no API pod would schedule. NetworkPolicy re-tested 2026-10-29 (`scripts/netpol-check.sh k3s`): same
       results as on kind once a pod runs, but kube-router leaves a new pod's egress open for its first 0.3-0.9 s.
-- [ ] **Database.** Run CloudNativePG on local-path storage, with backups to S3 through the operator's
+- [x] **Database.** Run CloudNativePG on local-path storage, with backups to S3 through the operator's
       barman integration. Data on a node's disk is the weak point here, and fixing it is part of Phase 4b.
       Built with the **Barman Cloud plugin** (+ cert-manager), not the in-tree `barmanObjectStore`, which is
       deprecated and removed in CNPG 1.31: WAL archiving plus a daily base backup (`k8s/overlays/k3s/backups.yaml`).
       The existing egress rule for the database already allows HTTPS to S3. The WAL archive is also the lasting
       fix for the 2.1 pg_rewind failure.
-- [ ] **AWS access from pods.** Self-managed nodes have no per-pod identity. Every pod can reach the node role
+      Since 2026-11-05 the data also outlives `make down`. The bucket moved to `terraform/aws/bootstrap`, and a new
+      database restores from the previous one's archive (`k8s/overlays/k3s-restore`, [k3s.md](k3s.md#keeping-the-data)).
+      Verified 2026-11-07: 10 test orders survived a nightly destroy and came back identical on the next `make up`.
+- [x] **AWS access from pods.** Self-managed nodes have no per-pod identity. Every pod can reach the node role
       through IMDS. Set the IMDS hop limit to 1 so pods can't use it, and keep **Sealed Secrets** from
       Phase 2 for DB credentials. Write down the limitation, because it's the main reason to move to EKS.
       Built: IMDSv2 required, hop limit 1. Sealed Secrets was never needed: CNPG generates the DB password. The
       limitation shows up in the backups instead: a static IAM access key, scoped to one bucket, in a Secret
       created by `make up` (see `terraform/aws/k3s/backups.tf`). The node roles can read only the join token, and
-      only the server can publish the kubeconfig.
-- [ ] **Delivery.** Add `overlays/k3s` and point Argo CD at it. GitHub Actions deploys to AWS through
+      only the server can publish the kubeconfig. Configured, but not yet tested from inside a pod.
+- [x] **Delivery.** Add `overlays/k3s` and point Argo CD at it. GitHub Actions deploys to AWS through
       **OIDC**, so no long-lived access keys are stored.
       Built: `k8s/overlays/k3s`, synced by Argo CD (`k8s/platform/values-k3s.yaml`, `scripts/argocd-up.sh k3s`). Argo
       CD pulls from git, so Actions never needs cluster credentials. Actions uses AWS (through OIDC, role scoped to
       main) only for the nightly destroy.
-- [ ] **Observability.** Run the same kube-prometheus-stack, SLO rules, and dashboards as on kind.
+      Verified 2026-11-07: a merge reached k3s as a canary (20%, 50%, then promoted after the analysis passed), with
+      no `kubectl`.
+- [x] **Observability.** Run the same kube-prometheus-stack, SLO rules, and dashboards as on kind.
       Add node-exporter alerts for disk and memory, since you now own the nodes.
       Built: same chart and values as kind (since 2026-10-31 through Argo CD, `k8s/platform`), and
       `k8s/monitoring/node-alerts.yaml` (severity ticket, runbook `docs/runbooks/NodeResources.md`).
       Prometheus is an emptyDir, so a curated subset (SLO results, latency, nodes, archiving) is remote-written
       to Grafana Cloud's free tier to outlive `make down` (`k8s/platform/files/kps-remote-write.yaml`).
-- [ ] **Cost guardrails.** An AWS Budget alert, `make up` / `make down` targets, and a nightly scheduled
+      Checked 2026-11-07 from Prometheus's own counters: about 900 series at 24 samples/s, 3 s behind, and no failed
+      samples after startup. The token in `grafana-cloud.env` can only write, so reading the data back needs a
+      second token with `metrics:read`.
+- [x] **Cost guardrails.** An AWS Budget alert, `make up` / `make down` targets, and a nightly scheduled
       `terraform destroy`.
       Built: budget in bootstrap (whole account, 50/80/100% plus forecast), `Makefile`, and
       `.github/workflows/k3s-nightly-destroy.yml` (07:00 UTC, needs the `AWS_K3S_ROLE_ARN` repository variable).
@@ -527,9 +535,23 @@ the cost, and the "what I had to run myself" list are in [docs/k3s.md](k3s.md).
       Bootstrap applied and the workflow verified 2026-10-12 (run 38356617495, a no-op destroy). The first
       run failed AssumeRoleWithWebIdentity: this repo's OIDC tokens use GitHub's immutable subject
       (`repo:owner@id/repo@id:...`), so the trust policy now matches that instead of the plain repo name.
+      From 2026-10-31 to 2026-11-06 every nightly destroy removed everything but the backup bucket, then failed: the
+      CI role couldn't delete the bucket's encryption setting (403). With the bucket in `terraform/aws/bootstrap`
+      the destroy no longer touches it. It succeeded on 2026-11-07, and the CI role can now only read the bucket.
+- [ ] **Unexplained resource spiral (2026-11-06).** About 30 minutes after `make up`, with no load running, catalog
+      checks failed hard enough to page (82× burn over 1 hour). API pods restarted, and four pods of the old
+      Deployment came back although git keeps it at 0. About 130 MB of WAL was written, and then the daily base
+      backup and the hourly Grafana snapshots stopped, though the nodes stayed up until the nightly destroy. Suspects:
+      `scaleDown: progressively` scales the Deployment back up when the Rollout fails, and KEDA's CPU trigger allows
+      6 Rollout pods, too many JVMs for two 4 GB agents next to Postgres and monitoring. The server node is the
+      tightest: it runs an API pod, and its pods' memory limits add up to more than it has. It didn't recur in the
+      1.5 hours watched on 2026-11-07 (lowest free memory 679 MiB, on the server, during a canary).
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
+
+Done 2026-11-07. The one exception to $0 per day is on purpose: the backup bucket stays so the database survives
+`make down`, at under a cent a month.
 
 **Experiment:** Stop the k3s server instance while k6 runs. Workloads keep serving, but nothing can be scheduled,
 scaled, or rolled out. Measure the budget spent, then compare it with killing an agent node.
