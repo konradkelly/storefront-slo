@@ -176,19 +176,22 @@ tests:
       - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
         values: '1x30'
     promql_expr_test:
+      # 100 within 1e-9, as above: 1 - 0.995 makes it 99.99999999999991.
       - expr: |
-          (
-            slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-              / scalar(1 - slo:checkout_availability:objective)
-            and on(rollouts_pod_template_hash)
-            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
-          )
-          or on(rollouts_pod_template_hash)
-          max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+          abs((
+            (
+              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
+                / scalar(1 - slo:checkout_availability:objective)
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+          ) - 100) < bool 1e-9
         eval_time: 20m
         exp_samples:
           - labels: '{rollouts_pod_template_hash="bbb"}'
-            value: 100
+            value: 1
       - expr: |
           (
             (
