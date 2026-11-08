@@ -449,11 +449,12 @@ Done in 2.2 (`scripts/experiments/exp4-disruption.sh`): 26 failed requests befor
       that keeps each pod's `rollouts-pod-template-hash`. Aborts above a burn rate of 6. Counts 5xx only, not payment
       declines. Fails safe: no verdict needs a scraped canary pod, and a blind check aborts after 4 minutes.
       Details and what took a few tries: [delivery.md](delivery.md#canary-releases).
-- [ ] Compare the canary with stable over the same minutes, so a database outage during a canary doesn't fail a
+- [x] Compare the canary with stable over the same minutes, so a database outage during a canary doesn't fail a
       good release (seen in the experiment's first attempt).
-      Built 2026-11-07, promtool-tested: the canary aborts only if it burns more than 6 faster than stable and the
-      difference is beyond chance (a two-proportion z-test, z > 3). A burn rate over 6 without that pauses the
-      Rollout instead. Not yet seen on a cluster.
+      Done 2026-11-07: the canary aborts only if it burns more than 6 faster than stable and the difference is beyond
+      chance (a two-proportion z-test, z > 3). A burn rate over 6 without that pauses the Rollout instead. On k3s, a
+      Postgres outage during a canary paused it 80 seconds in, with no abort, and it was promoted after resuming
+      ([delivery.md](delivery.md#experiment-a-database-outage-during-a-canary-2026-11-07-k3s)).
 
 **Done when:** A merge to main reaches the cluster without anyone running `kubectl`.
 

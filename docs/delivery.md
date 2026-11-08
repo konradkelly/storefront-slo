@@ -138,8 +138,11 @@ limit) goes out as a canary, judged by the SLIs and rolled back without anyone r
   (402) aren't counted: they come from the payment provider and hit both versions alike.
 - **A pause, not an abort, when both versions fail.** If the canary's own burn rate is over 6 but it isn't clearly
   worse than stable (a database outage, an overloaded cluster), the analysis is inconclusive and the Rollout pauses. It
-  doesn't blame a good release for the outage, and doesn't promote it into one. Once the outage is understood:
-  `kubectl argo rollouts promote storefront-api -n storefront` to carry on, or `abort` to go back to stable.
+  doesn't blame a good release for the outage, and doesn't promote it into one. Once the outage is over and the
+  5-minute windows have cleared (resuming sooner pauses it again): `kubectl argo rollouts promote storefront-api -n
+  storefront` to carry on, or `abort` to go back to stable. Without the kubectl plugin, the same resume is
+  `kubectl -n storefront patch rollout storefront-api --subresource=status --type=merge -p '{"status":{"pauseConditions":null}}'`,
+  or Resume on the Rollout in Argo CD.
 - **No verdict** before the canary has served 50 requests of a kind: the check returns 0 and passes, but only while
   Prometheus is scraping a canary pod. If Prometheus can't see the canary at all, the check errors, and 4 errors in
   a row abort. A release that arrives while nobody is shopping is promoted unjudged; the SLO alerts are the backstop.
@@ -182,7 +185,7 @@ The first attempt, an hour earlier, promoted the bad release, and that's how the
 - Just after that attempt's good release was promoted, the new stable version threw about 95 database errors
   (`CannotCreateTransactionException`, on every route) in 8 minutes. Had that landed during a canary, the analysis would have failed
   a good release: it judged the canary's errors in absolute terms. Since 2026-11-07 it compares the canary with
-  stable over the same minutes, and pauses when both are failing (above).
+  stable over the same minutes, and pauses when both are failing (above, and the next experiment).
 
 Other things that took a few tries, each with a comment where it's fixed:
 
@@ -195,6 +198,47 @@ Other things that took a few tries, each with a comment where it's fixed:
 - **Don't change the Deployment's template when introducing the Rollout.** A template change starts the
   Deployment's own rolling update next to the Rollout's new pods; on kind, 7 JVMs starting at once took Postgres down.
 - **More 60-second leases on kind:** Argo Rollouts and Envoy Gateway (30 restarts in an afternoon), like the others.
+
+### Experiment: a database outage during a canary (2026-11-07, k3s)
+
+Does a good release survive an outage that hits both versions? The release was `1d2fe34`, the z-test change itself,
+under k6 checkout-stress at 6 VUs through the Gateway (about 80 checkouts a minute). Postgres went down with
+CloudNativePG's declarative hibernation (`kubectl annotate cluster storefront-db cnpg.io/hibernation=on`), which stops
+both instances and keeps their volumes, and came back with `=off`.
+
+| Time | |
+|------|-|
+| 17:30:19 | canary at 20%; analysis starts |
+| 17:32:49 | 50 canary checkouts in 5 minutes: judged on real traffic, burn rate 0, z 0 |
+| 17:33:59 | Postgres hibernated |
+| 17:35:19 | catalog's own burn rate 9.6, over 6: inconclusive. Both comparisons 0. Rollout paused (`InconclusiveAnalysisRun`) |
+| 17:36:10 | Postgres woken; serving again about a minute later, same primary and timeline (no failover) |
+| 17:41 | the canary's 5-minute windows clear |
+| 17:54:19 | resumed (status patch, above) |
+| 18:00 | promoted, after the 50% step passed with 193 canary and 288 stable checkouts, no errors |
+
+The outage paged as it should: fast-burn pages for cart and catalog availability from 17:36 to 17:51, and tickets.
+No data was lost: the orders from the restore test kept their checksum.
+
+**Did the z-test matter?** Replaying the comparison's recording rules for the outage, at every 30-second evaluation
+(burn rates are the canary's and stable's own; the old rule aborted on a difference over 6):
+
+| | Canary | Stable | Difference | z | Old rule | Now |
+|---|---|---|---|---|---|---|
+| checkout 17:35:30 | 7.3 | 0.8 | 6.4 | 2.5 | abort | pass |
+| checkout 17:36:00 | 12.7 | 4.1 | 8.6 | 1.9 | abort | pass |
+| checkout 17:36:30 | 16.2 | 7.3 | 8.9 | 1.5 | abort | pass |
+| catalog 17:35:00 | 9.6 | 11.8 | -2.2 | -0.3 | pass | pass |
+| catalog 17:35:30 | 18.7 | 28.4 | -9.7 | -0.8 | pass | pass |
+| catalog 17:36:00 | 43.3 | 46.3 | -3.0 | -0.2 | pass | pass |
+| catalog 17:36:30 | 80.2 | 74.1 | 6.1 | 0.3 | abort | pass |
+
+The noise was as large as expected: catalog's difference swung from -9.7 to +6.1 within a minute. In this run, though,
+the old rule would have paused too. The difference can never exceed the canary's own burn rate, so the old rule
+aborts only if both cross 6 at the same once-a-minute check, and a failed check beats an inconclusive one. The first
+check after the outage began landed at 17:35:19, when only catalog's own burn rate had crossed, so the run paused and
+stopped measuring. A check at 17:35:30 would have seen checkout's difference at 6.4 and aborted a good release. The
+z-test makes the outcome independent of where the check lands.
 
 ## Local smoke and security checks
 
