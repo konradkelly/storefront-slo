@@ -46,9 +46,6 @@ spec:
           - name: canary-hash
             valueFrom:
               podTemplateHashValue: Latest
-          - name: stable-hash
-            valueFrom:
-              podTemplateHashValue: Stable
       steps:
         - setWeight: 20
         - pause: { duration: 5m }
@@ -57,7 +54,7 @@ spec:
 ---
 # Runs for the rest of the canary, once a minute. Each check reads the canary recording rules
 # (prometheus/rules/canary.yml): each version's own requests, told apart by their rollouts_pod_template_hash label
-# (podmonitor.yaml).
+# (podmonitor.yaml), and each version against the rest of the traffic, which during a canary is the stable version.
 #
 # What it judges: errors the code returns itself (5xx). Payment declines (402) aren't counted, unlike in the checkout
 # SLO: they come from the payment provider and hit both versions alike, so they say nothing about the release. That's
@@ -66,8 +63,12 @@ spec:
 # Two checks per SLI, both against a burn rate of 6, the rate at which the slow-burn alerts page
 # (prometheus/rules/slo-alerts.yml). For checkout that's 3% errors.
 #   - *-vs-stable: how much faster the canary burns than stable over the same 5 minutes. Over 6 aborts: the canary is
-#     worse than the version it replaces, so the release is to blame. A single failed check aborts: the 5-minute
-#     window already smooths out single requests.
+#     worse than the version it replaces, so the release is to blame. The difference counts only when it's beyond
+#     chance (a two-proportion z-test, z > 3). Without that, an outage on both versions would abort good releases:
+#     while the 5-minute windows fill with errors, a canary with ~90 checkouts lands ~6 points from stable by chance
+#     alone, and 3 points (a burn rate of 6) was enough. A real bad release clears it easily: BUG_MODE (10% errors)
+#     scores z ~6 by its first 50 checkouts. A single failed check aborts: the 5-minute window already smooths out
+#     single requests.
 #   - *-burn-rate: the canary's own burn rate. Over 6 while stable is just as bad (a database outage, an overloaded
 #     cluster) is neither a pass nor a fail. The check is inconclusive, so the Rollout pauses: it doesn't blame a good
 #     release for an outage, and doesn't promote it into one either. Someone then runs `kubectl argo rollouts
@@ -75,9 +76,9 @@ spec:
 #     release during a database outage.
 #
 # Each query returns one of three things:
-#   - the burn rate (or how much faster than stable), once the canary has served 50 requests of that kind. Stable
-#     counts only with 50 requests too. With fewer, it counts as 0 errors, and the comparison becomes the canary's own
-#     burn rate.
+#   - the burn rate (or how much faster than stable), once the canary has served 50 requests of that kind. The
+#     comparison also needs 50 from stable. Until then it gives 0, and the canary's own burn rate pauses a bad canary
+#     instead of aborting it: a handful of stable requests is no baseline.
 #   - 0 (pass) before that, as long as Prometheus is scraping a canary pod (up == 1). With few requests, one failure is
 #     already a high ratio (1 in 20 is 5%), and on an idle cluster every release would stall. The cost: a release that
 #     arrives while nobody is shopping is promoted unjudged, and only the SLO alerts catch it later.
@@ -94,7 +95,6 @@ metadata:
 spec:
   args:
     - name: canary-hash
-    - name: stable-hash
   metrics:
     - name: checkout-vs-stable
       interval: 1m
@@ -107,18 +107,9 @@ spec:
           address: http://prometheus-operated.monitoring.svc:9090
           query: |
             (
-              (
-                slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
-                - scalar(
-                    max(
-                      slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.stable-hash}}"}
-                      and on(rollouts_pod_template_hash)
-                      slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="{{args.stable-hash}}"} >= 50
-                    )
-                    or vector(0)
-                  )
-              )
-              / scalar(1 - slo:checkout_availability:objective)
+              slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="{{args.canary-hash}}"}
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="{{args.canary-hash}}"} > 3
               and on(rollouts_pod_template_hash)
               slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
             )
@@ -152,18 +143,9 @@ spec:
           address: http://prometheus-operated.monitoring.svc:9090
           query: |
             (
-              (
-                slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.canary-hash}}"}
-                - scalar(
-                    max(
-                      slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="{{args.stable-hash}}"}
-                      and on(rollouts_pod_template_hash)
-                      slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="{{args.stable-hash}}"} >= 50
-                    )
-                    or vector(0)
-                  )
-              )
-              / scalar(1 - slo:catalog_availability:objective)
+              slo_canary:catalog_vs_rest:burn_difference{rollouts_pod_template_hash="{{args.canary-hash}}"}
+              and on(rollouts_pod_template_hash)
+              slo_canary:catalog_vs_rest:zscore{rollouts_pod_template_hash="{{args.canary-hash}}"} > 3
               and on(rollouts_pod_template_hash)
               slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="{{args.canary-hash}}"} >= 50
             )

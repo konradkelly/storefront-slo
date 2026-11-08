@@ -64,32 +64,6 @@ tests:
         exp_samples:
           - labels: '{rollouts_pod_template_hash="bbb"}'
             value: 1
-      # Compared with stable (aaa, no 5xx): also 20, over 6, so checkout-vs-stable aborts.
-      - expr: |
-          abs((
-            (
-              (
-                slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-                - scalar(
-                    max(
-                      slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}
-                      and on(rollouts_pod_template_hash)
-                      slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="aaa"} >= 50
-                    )
-                    or vector(0)
-                  )
-              )
-              / scalar(1 - slo:checkout_availability:objective)
-              and on(rollouts_pod_template_hash)
-              slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
-            )
-            or on(rollouts_pod_template_hash)
-            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
-          ) - 20) < bool 1e-9
-        eval_time: 20m
-        exp_samples:
-          - labels: '{rollouts_pod_template_hash="bbb"}'
-            value: 1
 
   # A canary that has served only a few checkouts gets no verdict: 0, which passes, as long as Prometheus is scraping
   # it.
@@ -160,9 +134,52 @@ tests:
           - labels: 'slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="bbb"}'
             value: 500
 
+  # The comparison with the rest of the traffic, for the first scenario: stable (aaa) no 5xx, canary (bbb) 10% of 500
+  # checkouts. Pooled error ratio 5%, z 7.25 either way round, and the canary burns 20 faster than stable (within 1e-9),
+  # over 6: checkout-vs-stable aborts. Each version is compared with the other, so stable's numbers are the mirror image.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="201"}'
+        values: '0+100x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="201"}'
+        values: '0+90x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="500"}'
+        values: '0+10x30'
+      - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
+        values: '1x30'
+    promql_expr_test:
+      - expr: |
+          round(slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"}, 0.01)
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 7.25
+      - expr: |
+          round(slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="aaa"}, 0.01)
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="aaa"}'
+            value: -7.25
+      - expr: |
+          abs((
+            (
+              slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"} > 3
+              and on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+          ) - 20) < bool 1e-9
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 1
+
   # A database outage during a canary: both versions fail half their checkouts with a 500. The canary's own burn rate is
-  # 100, over 6, but stable's is the same: the comparison is 0. checkout-burn-rate is inconclusive (it never fails) and
-  # checkout-vs-stable passes, so the Rollout pauses instead of failing a good release.
+  # 100 (within 1e-9), over 6, but it's no worse than stable: z 0, and the comparison gives 0. checkout-burn-rate is
+  # inconclusive (it never fails) and checkout-vs-stable passes, so the Rollout pauses instead of failing a good release.
   - interval: 1m
     input_series:
       - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="201"}'
@@ -176,7 +193,6 @@ tests:
       - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
         values: '1x30'
     promql_expr_test:
-      # 100 within 1e-9, as above: 1 - 0.995 makes it 99.99999999999991.
       - expr: |
           abs((
             (
@@ -193,19 +209,16 @@ tests:
           - labels: '{rollouts_pod_template_hash="bbb"}'
             value: 1
       - expr: |
+          round(slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"}, 0.01)
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 0
+      - expr: |
           (
-            (
-              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-              - scalar(
-                  max(
-                    slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}
-                    and on(rollouts_pod_template_hash)
-                    slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="aaa"} >= 50
-                  )
-                  or vector(0)
-                )
-            )
-            / scalar(1 - slo:checkout_availability:objective)
+            slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"} > 3
             and on(rollouts_pod_template_hash)
             slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
           )
@@ -216,9 +229,52 @@ tests:
           - labels: '{rollouts_pod_template_hash="bbb"}'
             value: 0
 
-  # Stable has served too few checkouts to compare with (20 in 5 minutes), all of them failing. It counts as 0 errors,
-  # so the comparison is the canary's own burn rate (20) and still aborts, instead of hiding a bad canary behind a
-  # handful of stable failures.
+  # The false abort the z-test exists for: an outage on both versions, halfway through filling the 5-minute windows. By
+  # chance the canary's 100 checkouts have 40% errors and stable's 350 have 33%. The canary burns 14.29 faster, over 6,
+  # but at z 1.33 that's chance: the comparison gives 0, and the canary's own burn rate pauses the Rollout.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="201"}'
+        values: '0+47x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="500"}'
+        values: '0+23x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="201"}'
+        values: '0+12x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="500"}'
+        values: '0+8x30'
+      - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
+        values: '1x30'
+    promql_expr_test:
+      - expr: |
+          round(slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}, 0.01)
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 14.29
+      - expr: |
+          round(slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"}, 0.01)
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 1.33
+      - expr: |
+          (
+            slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"} > 3
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+          )
+          or on(rollouts_pod_template_hash)
+          max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 0
+
+  # Stable has served too few checkouts to compare with (20 in 5 minutes), all of them failing: no comparison series
+  # at all, so the check gives 0. The canary's own burn rate (20, within 1e-9) is over 6, so the Rollout pauses. A
+  # handful of stable failures can't make a bad canary look fine.
   - interval: 1m
     input_series:
       - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="500"}'
@@ -231,20 +287,28 @@ tests:
         values: '1x30'
     promql_expr_test:
       - expr: |
+          slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+        eval_time: 20m
+        exp_samples: []
+      - expr: |
+          (
+            slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"} > 3
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+          )
+          or on(rollouts_pod_template_hash)
+          max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 0
+      - expr: |
           abs((
             (
-              (
-                slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-                - scalar(
-                    max(
-                      slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}
-                      and on(rollouts_pod_template_hash)
-                      slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="aaa"} >= 50
-                    )
-                    or vector(0)
-                  )
-              )
-              / scalar(1 - slo:checkout_availability:objective)
+              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
+                / scalar(1 - slo:checkout_availability:objective)
               and on(rollouts_pod_template_hash)
               slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
             )
@@ -256,10 +320,12 @@ tests:
           - labels: '{rollouts_pod_template_hash="bbb"}'
             value: 1
 
-  # The comparison gives no verdict for a canary with too few checkouts (0, a pass while it's scraped), and nothing
-  # when Prometheus can't see the canary, exactly like the canary's own burn rate above.
+  # Like the canary's own burn rate, the comparison gives 0 for a canary with too few checkouts (while it's scraped), and
+  # nothing when Prometheus can't see the canary (ccc): 4 errors in a row abort.
   - interval: 1m
     input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/orders", method="POST", status="201"}'
+        values: '0+100x30'
       - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/orders", method="POST", status="500"}'
         values: '0+1x30'
       - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
@@ -269,18 +335,9 @@ tests:
     promql_expr_test:
       - expr: |
           (
-            (
-              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-              - scalar(
-                  max(
-                    slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}
-                    and on(rollouts_pod_template_hash)
-                    slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="aaa"} >= 50
-                  )
-                  or vector(0)
-                )
-            )
-            / scalar(1 - slo:checkout_availability:objective)
+            slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="bbb"} > 3
             and on(rollouts_pod_template_hash)
             slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
           )
@@ -292,18 +349,9 @@ tests:
             value: 0
       - expr: |
           (
-            (
-              slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="ccc"}
-              - scalar(
-                  max(
-                    slo_canary:checkout_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}
-                    and on(rollouts_pod_template_hash)
-                    slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="aaa"} >= 50
-                  )
-                  or vector(0)
-                )
-            )
-            / scalar(1 - slo:checkout_availability:objective)
+            slo_canary:checkout_vs_rest:burn_difference{rollouts_pod_template_hash="ccc"}
+            and on(rollouts_pod_template_hash)
+            slo_canary:checkout_vs_rest:zscore{rollouts_pod_template_hash="ccc"} > 3
             and on(rollouts_pod_template_hash)
             slo_canary:checkout_requests:increase5m{rollouts_pod_template_hash="ccc"} >= 50
           )
@@ -312,8 +360,46 @@ tests:
         eval_time: 20m
         exp_samples: []
 
-  # Catalog, compared with stable: canary bbb 3% 5xx (burn rate 30 against a 0.1% budget), stable aaa 1%. The canary
-  # burns 20 faster than stable (rounding again), over 6.
+  # Catalog: canary bbb 5% 5xx, stable aaa 1%, 500 requests each. z 3.71, and the canary burns 40 faster than stable
+  # (0.04 against a 0.1% budget, within 1e-9), over 6: abort.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/products", method="GET", status="200"}'
+        values: '0+99x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/products", method="GET", status="500"}'
+        values: '0+1x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/products/{id}", method="GET", status="200"}'
+        values: '0+95x30'
+      - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="bbb", uri="/products/{id}", method="GET", status="500"}'
+        values: '0+5x30'
+      - series: 'up{job="storefront-api", rollouts_pod_template_hash="bbb"}'
+        values: '1x30'
+    promql_expr_test:
+      - expr: |
+          round(slo_canary:catalog_vs_rest:zscore{rollouts_pod_template_hash="bbb"}, 0.01)
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 3.71
+      - expr: |
+          abs((
+            (
+              slo_canary:catalog_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+              and on(rollouts_pod_template_hash)
+              slo_canary:catalog_vs_rest:zscore{rollouts_pod_template_hash="bbb"} > 3
+              and on(rollouts_pod_template_hash)
+              slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+            )
+            or on(rollouts_pod_template_hash)
+            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+          ) - 40) < bool 1e-9
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 1
+
+  # Catalog, not beyond chance: canary 3% against stable 1% is 15 errors against 5 in 500 requests each, z 2.26. The
+  # comparison gives 0, and the canary's own burn rate (30) pauses it instead.
   - interval: 1m
     input_series:
       - series: 'http_server_requests_seconds_count{application="storefront-api", rollouts_pod_template_hash="aaa", uri="/products", method="GET", status="200"}'
@@ -328,27 +414,22 @@ tests:
         values: '1x30'
     promql_expr_test:
       - expr: |
-          abs((
-            (
-              (
-                slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="bbb"}
-                - scalar(
-                    max(
-                      slo_canary:catalog_errors:ratio_rate5m{rollouts_pod_template_hash="aaa"}
-                      and on(rollouts_pod_template_hash)
-                      slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="aaa"} >= 50
-                    )
-                    or vector(0)
-                  )
-              )
-              / scalar(1 - slo:catalog_availability:objective)
-              and on(rollouts_pod_template_hash)
-              slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
-            )
-            or on(rollouts_pod_template_hash)
-            max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
-          ) - 20) < bool 1e-9
+          round(slo_canary:catalog_vs_rest:zscore{rollouts_pod_template_hash="bbb"}, 0.01)
         eval_time: 20m
         exp_samples:
           - labels: '{rollouts_pod_template_hash="bbb"}'
-            value: 1
+            value: 2.26
+      - expr: |
+          (
+            slo_canary:catalog_vs_rest:burn_difference{rollouts_pod_template_hash="bbb"}
+            and on(rollouts_pod_template_hash)
+            slo_canary:catalog_vs_rest:zscore{rollouts_pod_template_hash="bbb"} > 3
+            and on(rollouts_pod_template_hash)
+            slo_canary:catalog_requests:increase5m{rollouts_pod_template_hash="bbb"} >= 50
+          )
+          or on(rollouts_pod_template_hash)
+          max by (rollouts_pod_template_hash) (up{job="storefront-api", rollouts_pod_template_hash="bbb"} == 1) * 0
+        eval_time: 20m
+        exp_samples:
+          - labels: '{rollouts_pod_template_hash="bbb"}'
+            value: 0
