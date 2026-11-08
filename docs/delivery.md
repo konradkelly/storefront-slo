@@ -128,11 +128,16 @@ limit) goes out as a canary, judged by the SLIs and rolled back without anyone r
   plugin sets the weights on the HTTPRoute's two backends, `storefront-api` (stable) and `storefront-api-canary`.
   Only traffic through the Gateway is split: in-cluster callers of the Service reach the stable version only, which
   is why the k6 Job now goes through the Gateway.
-- **Analysis**, once a minute from the 20% step on: the canary's checkout and catalog 5xx ratios, as burn rates
+- **Analysis**, once a minute from the 20% step on: each version's checkout and catalog 5xx ratios, as burn rates
   against the SLO budgets ([prometheus/rules/canary.yml](../prometheus/rules/canary.yml), grouped by the pods'
-  `rollouts-pod-template-hash` label, which the PodMonitor copies onto every series). A burn rate over 6 (the
-  slow-burn page threshold, 3% errors for checkout) aborts: traffic goes back to stable and the canary pods are
-  removed. Payment declines (402) aren't counted: they come from the payment provider and hit both versions alike.
+  `rollouts-pod-template-hash` label, which the PodMonitor copies onto every series). If the canary burns more than
+  6 faster than stable over the same 5 minutes (6 is the slow-burn page threshold, 3% errors for checkout), it
+  aborts: traffic goes back to stable and the canary pods are removed. Payment declines (402) aren't counted: they
+  come from the payment provider and hit both versions alike.
+- **A pause, not an abort, when both versions fail.** If the canary's own burn rate is over 6 but stable's is just
+  as high (a database outage, an overloaded cluster), the analysis is inconclusive and the Rollout pauses. It
+  doesn't blame a good release for the outage, and doesn't promote it into one. Once the outage is understood:
+  `kubectl argo rollouts promote storefront-api -n storefront` to carry on, or `abort` to go back to stable.
 - **No verdict** before the canary has served 50 requests of a kind: the check returns 0 and passes, but only while
   Prometheus is scraping a canary pod. If Prometheus can't see the canary at all, the check errors, and 4 errors in
   a row abort. A release that arrives while nobody is shopping is promoted unjudged; the SLO alerts are the backstop.
@@ -174,8 +179,8 @@ The first attempt, an hour earlier, promoted the bad release, and that's how the
   Now it passes without a verdict only while `up == 1` for a canary pod.
 - Just after that attempt's good release was promoted, the new stable version threw about 95 database errors
   (`CannotCreateTransactionException`, on every route) in 8 minutes. Had that landed during a canary, the analysis would have failed
-  a good release: it judges the canary's errors in absolute terms. Comparing the canary with stable over the same
-  minutes would tell a bad release from a bad database. Not done yet.
+  a good release: it judged the canary's errors in absolute terms. Since 2026-11-07 it compares the canary with
+  stable over the same minutes, and pauses when both are failing (above).
 
 Other things that took a few tries, each with a comment where it's fixed:
 

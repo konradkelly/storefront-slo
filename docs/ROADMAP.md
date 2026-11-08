@@ -451,6 +451,8 @@ Done in 2.2 (`scripts/experiments/exp4-disruption.sh`): 26 failed requests befor
       Details and what took a few tries: [delivery.md](delivery.md#canary-releases).
 - [ ] Compare the canary with stable over the same minutes, so a database outage during a canary doesn't fail a
       good release (seen in the experiment's first attempt).
+      Built 2026-11-07, promtool-tested: the canary aborts only if it burns more than 6 faster than stable, and a
+      burn rate over 6 on both versions pauses the Rollout instead. Not yet seen on a cluster.
 
 **Done when:** A merge to main reaches the cluster without anyone running `kubectl`.
 
