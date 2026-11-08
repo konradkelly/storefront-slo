@@ -11,6 +11,12 @@
 #     version alike, so they say nothing about a release
 #   - only a 5-minute window: a canary lives for minutes
 # A version with requests but no errors gets 0 (the `or ... * 0` terms), not a missing series.
+#
+# Each version against the rest of the traffic (*_rest, *_vs_rest), for the canary analysis's comparison with stable:
+# during a canary, the rest is the stable version (and any of its pods still draining). These need counts, not only
+# ratios, for the z-test: is the difference between the two error ratios more than chance? Pooled two-proportion
+# z-test: z = (p1 - p2) / sqrt(p (1 - p) (1/n1 + 1/n2)), with p the error ratio of all the traffic. Both exist only
+# once the rest has served 50 requests of that kind; with one version, there's nothing to compare.
 groups:
   - name: slo-canary
     interval: 30s
@@ -39,3 +45,85 @@ groups:
       - record: slo_canary:catalog_requests:increase5m
         expr: |
           sum by (rollouts_pod_template_hash) (increase(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[5m]))
+      - record: slo_canary:checkout_errors:increase5m
+        expr: |
+          sum by (rollouts_pod_template_hash) (increase(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status=~"5.."}[5m]))
+          or
+          sum by (rollouts_pod_template_hash) (increase(http_server_requests_seconds_count{application="storefront-api", uri="/orders", method="POST", status!~"400|409"}[5m])) * 0
+      - record: slo_canary:checkout_errors_rest:increase5m
+        expr: scalar(sum(slo_canary:checkout_errors:increase5m)) - slo_canary:checkout_errors:increase5m
+      - record: slo_canary:checkout_requests_rest:increase5m
+        expr: scalar(sum(slo_canary:checkout_requests:increase5m)) - slo_canary:checkout_requests:increase5m
+      - record: slo_canary:checkout_vs_rest:burn_difference
+        expr: |
+          (
+            slo_canary:checkout_errors:ratio_rate5m
+            - on(rollouts_pod_template_hash)
+            slo_canary:checkout_errors_rest:increase5m
+              / on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests_rest:increase5m
+          )
+          / scalar(1 - slo:checkout_availability:objective)
+          and on(rollouts_pod_template_hash)
+          slo_canary:checkout_requests_rest:increase5m >= 50
+      - record: slo_canary:checkout_vs_rest:zscore
+        expr: |
+          (
+            slo_canary:checkout_errors:ratio_rate5m
+            - on(rollouts_pod_template_hash)
+            slo_canary:checkout_errors_rest:increase5m
+              / on(rollouts_pod_template_hash)
+              slo_canary:checkout_requests_rest:increase5m
+          )
+          / on(rollouts_pod_template_hash)
+          clamp_min(
+            sqrt(
+              scalar(sum(slo_canary:checkout_errors:increase5m) / sum(slo_canary:checkout_requests:increase5m))
+              * scalar(1 - sum(slo_canary:checkout_errors:increase5m) / sum(slo_canary:checkout_requests:increase5m))
+              * (1 / slo_canary:checkout_requests:increase5m + on(rollouts_pod_template_hash) 1 / slo_canary:checkout_requests_rest:increase5m)
+            ),
+            1e-12
+          )
+          and on(rollouts_pod_template_hash)
+          slo_canary:checkout_requests_rest:increase5m >= 50
+      - record: slo_canary:catalog_errors:increase5m
+        expr: |
+          sum by (rollouts_pod_template_hash) (increase(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*", status=~"5.."}[5m]))
+          or
+          sum by (rollouts_pod_template_hash) (increase(http_server_requests_seconds_count{application="storefront-api", uri=~"/products.*"}[5m])) * 0
+      - record: slo_canary:catalog_errors_rest:increase5m
+        expr: scalar(sum(slo_canary:catalog_errors:increase5m)) - slo_canary:catalog_errors:increase5m
+      - record: slo_canary:catalog_requests_rest:increase5m
+        expr: scalar(sum(slo_canary:catalog_requests:increase5m)) - slo_canary:catalog_requests:increase5m
+      - record: slo_canary:catalog_vs_rest:burn_difference
+        expr: |
+          (
+            slo_canary:catalog_errors:ratio_rate5m
+            - on(rollouts_pod_template_hash)
+            slo_canary:catalog_errors_rest:increase5m
+              / on(rollouts_pod_template_hash)
+              slo_canary:catalog_requests_rest:increase5m
+          )
+          / scalar(1 - slo:catalog_availability:objective)
+          and on(rollouts_pod_template_hash)
+          slo_canary:catalog_requests_rest:increase5m >= 50
+      - record: slo_canary:catalog_vs_rest:zscore
+        expr: |
+          (
+            slo_canary:catalog_errors:ratio_rate5m
+            - on(rollouts_pod_template_hash)
+            slo_canary:catalog_errors_rest:increase5m
+              / on(rollouts_pod_template_hash)
+              slo_canary:catalog_requests_rest:increase5m
+          )
+          / on(rollouts_pod_template_hash)
+          clamp_min(
+            sqrt(
+              scalar(sum(slo_canary:catalog_errors:increase5m) / sum(slo_canary:catalog_requests:increase5m))
+              * scalar(1 - sum(slo_canary:catalog_errors:increase5m) / sum(slo_canary:catalog_requests:increase5m))
+              * (1 / slo_canary:catalog_requests:increase5m + on(rollouts_pod_template_hash) 1 / slo_canary:catalog_requests_rest:increase5m)
+            ),
+            1e-12
+          )
+          and on(rollouts_pod_template_hash)
+          slo_canary:catalog_requests_rest:increase5m >= 50

@@ -131,11 +131,13 @@ limit) goes out as a canary, judged by the SLIs and rolled back without anyone r
 - **Analysis**, once a minute from the 20% step on: each version's checkout and catalog 5xx ratios, as burn rates
   against the SLO budgets ([prometheus/rules/canary.yml](../prometheus/rules/canary.yml), grouped by the pods'
   `rollouts-pod-template-hash` label, which the PodMonitor copies onto every series). If the canary burns more than
-  6 faster than stable over the same 5 minutes (6 is the slow-burn page threshold, 3% errors for checkout), it
-  aborts: traffic goes back to stable and the canary pods are removed. Payment declines (402) aren't counted: they
-  come from the payment provider and hit both versions alike.
-- **A pause, not an abort, when both versions fail.** If the canary's own burn rate is over 6 but stable's is just
-  as high (a database outage, an overloaded cluster), the analysis is inconclusive and the Rollout pauses. It
+  6 faster than stable over the same 5 minutes (6 is the slow-burn page threshold, 3% errors for checkout), and the
+  difference is beyond chance (a two-proportion z-test, z > 3), it aborts: traffic goes back to stable and the canary
+  pods are removed. Without the z-test, an outage on both versions would abort good releases: while the 5-minute
+  windows fill with errors, a canary with ~90 checkouts lands several points from stable by chance. Payment declines
+  (402) aren't counted: they come from the payment provider and hit both versions alike.
+- **A pause, not an abort, when both versions fail.** If the canary's own burn rate is over 6 but it isn't clearly
+  worse than stable (a database outage, an overloaded cluster), the analysis is inconclusive and the Rollout pauses. It
   doesn't blame a good release for the outage, and doesn't promote it into one. Once the outage is understood:
   `kubectl argo rollouts promote storefront-api -n storefront` to carry on, or `abort` to go back to stable.
 - **No verdict** before the canary has served 50 requests of a kind: the check returns 0 and passes, but only while
