@@ -542,14 +542,21 @@ myself" list are in [docs/k3s.md](k3s.md).
       From 2026-10-31 to 2026-11-06 every nightly destroy removed everything but the backup bucket, then failed: the
       CI role couldn't delete the bucket's encryption setting (403). With the bucket in `terraform/aws/bootstrap`
       the destroy no longer touches it. It succeeded on 2026-11-07, and the CI role can now only read the bucket.
-- [ ] **Unexplained resource spiral (2026-11-06).** About 30 minutes after `make up`, with no load running, catalog
-      checks failed hard enough to page (82× burn over 1 hour). API pods restarted, and four pods of the old
-      Deployment came back although git keeps it at 0. About 130 MB of WAL was written, and then the daily base
-      backup and the hourly Grafana snapshots stopped, though the nodes stayed up until the nightly destroy. Suspects:
-      `scaleDown: progressively` scales the Deployment back up when the Rollout fails, and KEDA's CPU trigger allows
-      6 Rollout pods, too many JVMs for two 4 GB agents next to Postgres and monitoring. The server node is the
-      tightest: it runs an API pod, and its pods' memory limits add up to more than it has. It didn't recur in the
-      1.5 hours watched on 2026-11-07 (lowest free memory 679 MiB, on the server, during a canary).
+- [ ] **Resource spiral (2026-11-06): explained and fixed in code, not yet checked on a cluster.** 20 minutes after
+      `make up`, the server node ran out of memory and thrashed instead of killing a pod. The API server and the
+      kubelet, one process in k3s, stopped answering for good at 00:19 UTC. `scaleDown: progressively` then scaled
+      the old Deployment up to stand in for the Rollout's unready pods, putting more JVMs on that node. The agents
+      were fine, so the first guess here was wrong. Explained on 2026-11-08 from Grafana Cloud's copy of the metrics:
+      [postmortem](postmortems/2026-11-06-k3s-server-memory-thrash.md). Fixed: `scaleDown: never`, with Argo CD now
+      enforcing the Deployment's 0 replicas; 1 GiB reserved for the k3s process on the server; and a memory eviction
+      threshold on every node (k3s's kubelet had none). Three open actions from the 2026-10-29 postmortem mattered
+      again: the only CoreDNS ran on the server, alerts had no external dead man's switch, and workloads still share
+      the server.
+      To check on the next `make up`:
+      - the server's allocatable memory is about 2.5 GiB;
+      - the kubelet's `/configz` shows the thresholds;
+      - nothing is Pending, and nothing is evicted in a normal run;
+      - the k3s process fits in 1 GiB. That figure is an estimate, so measure the process.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.

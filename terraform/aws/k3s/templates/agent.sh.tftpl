@@ -14,12 +14,14 @@ for _ in $(seq 30); do
   sleep 5
 done
 
-# Flags, and why the install is retried, in server.sh.tftpl.
+# Flags, and why the install is retried, in server.sh.tftpl. Agents get the same eviction thresholds, but no
+# reservation: they don't run the control plane.
 install_k3s() {
   curl -sfL https://get.k3s.io | \
     INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
     K3S_URL='https://${server_ip}:6443' K3S_TOKEN="$token" sh -s - agent \
       --prefer-bundled-bin \
+      --kubelet-arg "eviction-hard=memory.available<300Mi,imagefs.available<5%,nodefs.available<5%" \
       --node-label "topology.kubernetes.io/zone=$zone" \
       --node-label "topology.kubernetes.io/region=${region}"
 }

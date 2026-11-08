@@ -46,15 +46,9 @@ spec:
       # with a merge patch, which replaces a whole list, so the HTTPRoute's backendRefs kept the live (one backend)
       # list and git's canary backend never arrived.
       - ApplyOutOfSyncOnly=true
-  # Fields other controllers own.
+  # Fields other controllers own. Not the Deployment's replicas: git's 0 is enforced, so its pods can't come back
+  # (docs/postmortems/2026-11-06-k3s-server-memory-thrash.md).
   ignoreDifferences:
-    # git says 0, and the Rollout scales an older Deployment's pods down to 0 itself (k8s/base/rollout.yaml).
-    - group: apps
-      kind: Deployment
-      name: storefront-api
-      namespace: storefront
-      jsonPointers:
-        - /spec/replicas
     # KEDA owns the Rollout's count. git's value applies only when the Rollout itself changes in git, and KEDA then
     # scales it back.
     - group: argoproj.io

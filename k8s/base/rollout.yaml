@@ -4,9 +4,9 @@
 # burns the SLO budget much faster, the Rollout aborts: traffic goes back to the old version and the new pods are
 # removed, without anyone running kubectl. The fix is then a revert in git, like any other bad commit.
 #
-# The pod template stays in the Deployment (storefront-api.yaml). This Rollout points at it (workloadRef) and scales
-# it to 0, so overlays, the soak drill and the fault experiments still patch a Deployment, and every change to its
-# template becomes a canary. The CI overlay has no Argo Rollouts and runs the Deployment as it is.
+# The pod template stays in the Deployment (storefront-api.yaml). This Rollout points at it (workloadRef) and leaves
+# it at the 0 replicas git sets, so overlays, the soak drill and the fault experiments still patch a Deployment, and
+# every change to its template becomes a canary. The CI overlay has no Argo Rollouts and runs the Deployment as it is.
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
@@ -24,7 +24,11 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: storefront-api
-    scaleDown: progressively # hand over from the Deployment's pods as the Rollout's become ready
+    # never: the Rollout doesn't scale the Deployment at all. progressively was for handing over from a Deployment
+    # that already ran pods, and none does now. It also scales the Deployment back up whenever the Rollout's first
+    # revision is unhealthy, to the Rollout's count minus its ready pods. On 2026-11-06 that started more JVMs on a
+    # node that was already out of memory (docs/postmortems/2026-11-06-k3s-server-memory-thrash.md).
+    scaleDown: never
   strategy:
     canary:
       # Rollouts adds the pod-template hash of each version to these Services' selectors, and the Gateway API plugin

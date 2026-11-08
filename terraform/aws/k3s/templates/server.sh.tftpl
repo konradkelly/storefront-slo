@@ -19,6 +19,13 @@ done
 #   NetworkPolicy). --secrets-encryption: Secrets are encrypted at rest in the datastore.
 # Zone/region labels: base/storefront-api.yaml spreads pods across topology.kubernetes.io/zone with DoNotSchedule,
 #   and k3s without a cloud provider sets no zone label, so without these no API pod would schedule.
+# system-reserved: the k3s process (API server, scheduler, controllers, kubelet, containerd, datastore) isn't a pod,
+#   so the scheduler let pods request all 3.8 GiB next to it. 1 GiB comes off what pods can request here, and the
+#   kubelet caps the cgroup all pods share at the rest. 1 GiB is an estimate: measure the process and adjust.
+# eviction-hard: k3s's kubelet config sets only the disk thresholds, and a kubelet given any threshold drops the
+#   defaults for the others, so no node evicted pods for low memory. The disk values are k3s's own. On 2026-11-06 the
+#   server thrashed instead, and the API server stopped answering
+#   (docs/postmortems/2026-11-06-k3s-server-memory-thrash.md).
 install_k3s() {
   curl -sfL https://get.k3s.io | \
     INSTALL_K3S_VERSION='${k3s_version}' INSTALL_K3S_SKIP_SELINUX_RPM=true INSTALL_K3S_SELINUX_WARN=true \
@@ -29,6 +36,8 @@ install_k3s() {
       --secrets-encryption \
       --write-kubeconfig-mode 0600 \
       --tls-san ${public_ip} \
+      --kubelet-arg "system-reserved=memory=1Gi" \
+      --kubelet-arg "eviction-hard=memory.available<300Mi,imagefs.available<5%,nodefs.available<5%" \
       --node-label "topology.kubernetes.io/zone=$zone" \
       --node-label "topology.kubernetes.io/region=${region}"
 }
