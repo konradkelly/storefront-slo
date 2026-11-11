@@ -23,6 +23,14 @@ k create namespace argocd --dry-run=client -o yaml | k apply -f -
 k apply --server-side -n argocd \
   -f "https://raw.githubusercontent.com/argoproj/argo-cd/$version/manifests/install.yaml"
 k -n argocd patch configmap argocd-cm --type merge --patch-file k8s/argocd/argocd-cm.yaml
+# Memory requests, which install.yaml leaves out, so the scheduler counts Argo CD. Without one, the application
+# controller used 420-500 MiB on the k3s server, and the scheduler saw nothing (2026-11-11). The repo server uses
+# ~70 MiB, more while it renders charts; the rest use 20-30 MiB. No limits: an OOM-killed controller stops every sync.
+k -n argocd set resources statefulset/argocd-application-controller --requests=memory=512Mi
+k -n argocd set resources deployment/argocd-repo-server --requests=memory=128Mi
+k -n argocd set resources deployment/argocd-server deployment/argocd-redis --requests=memory=64Mi
+k -n argocd set resources deployment/argocd-applicationset-controller deployment/argocd-dex-server \
+  deployment/argocd-notifications-controller --requests=memory=32Mi
 k -n argocd rollout status deployment/argocd-server --timeout=600s
 k -n argocd rollout status deployment/argocd-repo-server --timeout=600s
 k -n argocd rollout status statefulset/argocd-application-controller --timeout=600s

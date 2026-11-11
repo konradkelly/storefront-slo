@@ -5,7 +5,8 @@
 # Secrets; Argo CD installs everything else from GitHub (k8s/platform, values-k3s.yaml).
 #   bash scripts/k3s-up.sh        (or: make up)
 #
-# COSTS MONEY while it exists: 3 x t3.medium + 3 public IPv4 + 90 GB gp3 ≈ $0.15/hr ≈ $3.60/day.
+# COSTS MONEY while it exists: a t3.large server + 2 t3.medium agents + 3 public IPv4 + 90 GB gp3 ≈ $0.19/hr
+# ≈ $4.60/day.
 # `make down` (scripts/k3s-down.sh) stops that, and .github/workflows/k3s-nightly-destroy.yml runs it every night in
 # case you forget. Only the backup bucket stays, at under a cent a month.
 #

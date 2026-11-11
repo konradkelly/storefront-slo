@@ -21,7 +21,16 @@ variable "k3s_version" {
 
 variable "instance_type" {
   type    = string
-  default = "t3.medium" # 2 vCPU / 4 GiB; three of them hold the same stack as the kind lab
+  default = "t3.medium" # 2 vCPU / 4 GiB, for the agents
+}
+
+variable "server_instance_type" {
+  type        = string
+  default     = "t3.large" # 2 vCPU / 8 GiB
+  description = <<-EOT
+    The server runs the control plane as well as pods. On 2026-11-11 the k3s process alone used 1.9 GiB, which
+    left a 4 GiB server under 800 MiB free with no load (docs/postmortems/2026-11-06-k3s-server-memory-thrash.md).
+  EOT
 }
 
 variable "agent_count" {

@@ -46,11 +46,15 @@ The nightly workflow (`.github/workflows/k3s-nightly-destroy.yml`, 07:00 UTC) de
 
 | Item | Rate |
 |------|------|
-| 3 × t3.medium | $0.125/hr |
+| 1 × t3.large (server) + 2 × t3.medium (agents) | $0.166/hr |
 | 3 public IPv4 addresses (incl. the server's Elastic IP) | $0.015/hr |
 | 3 × 30 GB gp3 | ~$0.010/hr |
 | S3 backups, SSM parameters, data transfer | cents |
-| **Total** | **~$0.15/hr, ~$3.60/day if left up** |
+| **Total** | **~$0.19/hr, ~$4.60/day if left up** |
+
+The server is the bigger node because it runs the control plane next to its pods: on 2026-11-11 the k3s process
+alone used 1.9 GiB, and a 4 GiB server had under 800 MiB left with no load
+([postmortem](postmortems/2026-11-06-k3s-server-memory-thrash.md)).
 
 No load balancer (ServiceLB uses the nodes' own ports) and no NAT gateway. A NAT gateway gives instances in
 *private* subnets a way out. These nodes sit in public subnets with their own addresses, so they reach the
@@ -101,8 +105,8 @@ Size runs by the alert windows, not the calendar:
 | Run | Duration | Cost |
 |-----|----------|------|
 | Shakedown: `make up` works, fill in the list below | 2-3 h | ~$0.50 |
-| Experiment sessions: control plane stop, agent stop, NetworkPolicy re-test, backup restore drill (all four done in one 2-hour session on Oct 29) | 2-4 h each | ~$0.50 each |
-| Soak: steady low load, to see ticket alerts, daily backups, memory/disk trends on real data | 72 h (24 h if tight) | ~$11 ($3.60) |
+| Experiment sessions: control plane stop, agent stop, NetworkPolicy re-test, backup restore drill (all four done in one 2-hour session on Oct 29) | 2-4 h each | ~$0.60 each |
+| Soak: steady low load, to see ticket alerts, daily backups, memory/disk trends on real data | 72 h (24 h if tight) | ~$14 ($4.60) |
 
 About $15 for the whole phase. Give each session ~30 minutes of baseline load before breaking anything, so the
 short windows have something to compare against.

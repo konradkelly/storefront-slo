@@ -111,7 +111,7 @@ flowchart TD
     keda -->|"more desired"| deploy
     unready --> dns
 
-    fix1["Fix: 1 GiB reserved for k3s<br/>(system-reserved)"]:::fix
+    fix1["Fix: 8 GiB server, 2.5 GiB reserved<br/>for k3s, Argo CD requests memory"]:::fix
     fix2["Fix: evict a pod below 300 MiB free<br/>(eviction-hard)"]:::fix
     fix3["Fix: scaleDown: never,<br/>Argo CD enforces 0 replicas"]:::fix
     fix1 -.-> mem
@@ -135,8 +135,10 @@ Why it happened, step by step:
 3. **Why did the node run out?** The scheduler only counts pods' memory requests. The k3s process (API server,
    controllers, scheduler, kubelet, containerd and the datastore) had no reservation, so pods could request all
    3836 MiB next to it. On 2026-11-07 the server's pods requested 2054 MiB, and their limits added up to 4074 MiB,
-   more than the node has. Which container grew most on 11-06 isn't known, because per-container memory isn't sent
-   to Grafana Cloud.
+   more than the node has. Measured afterwards, on 2026-11-11: the k3s process alone used 1.9 GiB, and Argo CD's
+   application controller used about 500 MiB on the server while requesting none, so the scheduler couldn't see
+   it either. Which container grew most on 11-06 isn't known, because per-container memory isn't sent to Grafana
+   Cloud.
 4. **Why did it get worse instead of settling?** `scaleDown: progressively` was meant for a one-time move from a
    Deployment to a Rollout. While the Rollout's first revision is unhealthy, Argo Rollouts sets the Deployment to the
    Rollout's desired count minus its ready pods (`rollout/replicaset.go`). That covers every fresh `make up` until
@@ -158,14 +160,28 @@ intact. The fixes in the diagram are in code and take effect on the next `make u
 - `scaleDown: never` in [rollout.yaml](../../k8s/base/rollout.yaml). Argo CD no longer ignores the Deployment's
   replicas ([storefront.yaml](../../k8s/platform/templates/storefront.yaml)), so self-heal puts it back to 0 if
   anything changes it.
-- On the server, `--kubelet-arg system-reserved=memory=1Gi`. Pods can then request about 2.5 GiB there (3836 MiB
-  less 1 GiB, less the 300 MiB eviction threshold). That's still room for the 2054 MiB seen on 11-07 plus a second
-  API pod. The kubelet also caps the cgroup all pods share at 3836 MiB less 1 GiB, so pods can't take the control
-  plane's share.
+- The server is a t3.large (8 GiB), with `--kubelet-arg system-reserved=memory=2560Mi`
+  ([variables.tf](../../terraform/aws/k3s/variables.tf)). That's the 1.9 GiB measured for k3s plus a third for
+  load. Pods can request the rest, less the 300 MiB eviction threshold. The kubelet also caps the cgroup all pods
+  share at the node's capacity less the reservation, so pods can't take the control plane's share. The agents stay
+  t3.medium.
+- Argo CD's pods get memory requests ([argocd-up.sh](../../scripts/argocd-up.sh)): 512 Mi for the application
+  controller, and 32-128 Mi for the rest.
 - On every node, `eviction-hard=memory.available<300Mi` with k3s's disk thresholds kept
   ([server.sh.tftpl](../../terraform/aws/k3s/templates/server.sh.tftpl),
-  [agent.sh.tftpl](../../terraform/aws/k3s/templates/agent.sh.tftpl)). The kubelet measures memory a little more
-  strictly than node-exporter's "available" does, so it acts somewhat before node-exporter shows 300 MiB.
+  [agent.sh.tftpl](../../terraform/aws/k3s/templates/agent.sh.tftpl)). Measured at the same moment, the kubelet's
+  "available" matched node-exporter's on the server and was 440-560 MiB lower on the agents. So the kubelet acts no
+  later than node-exporter shows 300 MiB.
+
+The API pods still spread over all three zones, so one runs on the server: losing any one node takes out a third of
+them.
+
+**Checked on 2026-11-11** with the first version of these fixes, which reserved 1 GiB on a 4 GiB server:
+- every node had the thresholds, and the server had the reservation;
+- nothing was Pending or evicted, the Deployment stayed at 0, and the Rollout used `scaleDown: never`.
+
+But the k3s process used 1.9 GiB, and the server had 509-800 MiB free with no load, so the reservation was too
+small. That led to the bigger server and the Argo CD requests above.
 
 ## What went well
 
@@ -194,10 +210,12 @@ intact. The fixes in the diagram are in code and take effect on the next `make u
 
 | Action | Type | Owner | Tracking |
 |--------|------|-------|----------|
-| `scaleDown: never`, and Argo CD enforces the Deployment's 0 replicas | prevent | | done in code, verify on the next `make up` ([ROADMAP](../ROADMAP.md)) |
-| Reserve 1 GiB for the k3s process on the server (`system-reserved`) | prevent | | done in code, verify on the next `make up` |
-| Memory eviction threshold on every node (`eviction-hard=memory.available<300Mi`) | mitigate | | done in code, verify on the next `make up` |
-| On the next `make up`, check: the server's allocatable memory is about 2.5 GiB, the kubelet's `/configz` shows the thresholds, nothing is Pending, and nothing is evicted in a normal run. Measure the k3s process's memory to size the reservation | process | | [ROADMAP](../ROADMAP.md) |
+| `scaleDown: never`, and Argo CD enforces the Deployment's 0 replicas | prevent | | done, checked on 2026-11-11 |
+| Reserve memory for the k3s process on the server (`system-reserved`) | prevent | | done. 1 GiB was checked on 2026-11-11 and found too small; now 2.5 GiB on a t3.large, verify on the next `make up` |
+| Memory eviction threshold on every node (`eviction-hard=memory.available<300Mi`) | mitigate | | done, checked on 2026-11-11 |
+| Server on a t3.large (8 GiB), agents stay t3.medium. About $0.04/hr more | prevent | | done in code, verify on the next `make up` |
+| Memory requests for Argo CD's pods | prevent | | done in code, verify on the next `make up` |
+| On the next `make up`, check: the k3s process stays under 2.5 GiB, including during a canary, and nothing is Pending (no API pod in particular) | process | | [ROADMAP](../ROADMAP.md) |
 | Send per-pod memory to Grafana Cloud (working set summed by pod: a few dozen series), so the next incident can name the biggest consumer | detect | | |
 | CoreDNS: two replicas, spread across nodes. From 2026-10-29, still open | prevent | | |
 | Route `Watchdog` to an external dead man's switch. From 2026-10-29, still open | detect | | |

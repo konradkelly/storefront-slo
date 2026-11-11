@@ -479,8 +479,8 @@ Built 2026-10-12, first applied 2026-10-24, and in use since. How to run it, the
 myself" list are in [docs/k3s.md](k3s.md).
 
 - [x] **Terraform foundation.** State in S3 with locking. Modules for a VPC, security groups, and EC2 instances:
-      1 k3s server and 2 agents (t3.medium), installed through `user_data`. Use **SSM Session Manager**
-      instead of SSH so port 22 stays closed. Expose the Kubernetes API only to your IP, or reach it
+      1 k3s server and 2 agents (t3.medium; the server is a t3.large since 2026-11-11), installed through
+      `user_data`. Use **SSM Session Manager** instead of SSH so port 22 stays closed. Expose the Kubernetes API only to your IP, or reach it
       through an SSM port-forward.
       Built: `terraform/aws/bootstrap` (state bucket with S3-native locking, no DynamoDB) and `terraform/aws/k3s`
       (one public subnet per zone, no NAT gateway, Amazon Linux 2023, k3s v1.34.12). The API and port 80 are open to
@@ -542,21 +542,31 @@ myself" list are in [docs/k3s.md](k3s.md).
       From 2026-10-31 to 2026-11-06 every nightly destroy removed everything but the backup bucket, then failed: the
       CI role couldn't delete the bucket's encryption setting (403). With the bucket in `terraform/aws/bootstrap`
       the destroy no longer touches it. It succeeded on 2026-11-07, and the CI role can now only read the bucket.
-- [ ] **Resource spiral (2026-11-06): explained and fixed in code, not yet checked on a cluster.** 20 minutes after
+- [ ] **Resource spiral (2026-11-06): explained and fixed, the server's new size not yet checked.** 20 minutes after
       `make up`, the server node ran out of memory and thrashed instead of killing a pod. The API server and the
       kubelet, one process in k3s, stopped answering for good at 00:19 UTC. `scaleDown: progressively` then scaled
       the old Deployment up to stand in for the Rollout's unready pods, putting more JVMs on that node. The agents
       were fine, so the first guess here was wrong. Explained on 2026-11-08 from Grafana Cloud's copy of the metrics:
       [postmortem](postmortems/2026-11-06-k3s-server-memory-thrash.md). Fixed: `scaleDown: never`, with Argo CD now
-      enforcing the Deployment's 0 replicas; 1 GiB reserved for the k3s process on the server; and a memory eviction
-      threshold on every node (k3s's kubelet had none). Three open actions from the 2026-10-29 postmortem mattered
-      again: the only CoreDNS ran on the server, alerts had no external dead man's switch, and workloads still share
-      the server.
+      enforcing the Deployment's 0 replicas; memory reserved for the k3s process on the server; and a memory
+      eviction threshold on every node (k3s's kubelet had none). Three open actions from the 2026-10-29 postmortem
+      mattered again: the only CoreDNS ran on the server, alerts had no external dead man's switch, and workloads
+      still share the server.
+      Checked on 2026-11-11:
+      - The thresholds and the reservation were in place, nothing was Pending or evicted, and the Deployment stayed
+        at 0.
+      - The k3s process used 1.9 GiB, not the 1 GiB first reserved, and left the 4 GiB server under 800 MiB free
+        with no load.
+      - Argo CD's application controller used about 500 MiB there with no memory request, so the scheduler didn't
+        count it.
+
+      So the server is now a t3.large (8 GiB) with 2.5 GiB reserved, and Argo CD's pods have memory requests
+      (`scripts/argocd-up.sh`). The API pods still spread over three zones.
       To check on the next `make up`:
-      - the server's allocatable memory is about 2.5 GiB;
-      - the kubelet's `/configz` shows the thresholds;
-      - nothing is Pending, and nothing is evicted in a normal run;
-      - the k3s process fits in 1 GiB. That figure is an estimate, so measure the process.
+      - the server is a t3.large, with allocatable memory of its capacity less 2.8 GiB;
+      - the k3s process stays under 2.5 GiB, including during a canary;
+      - Argo CD's pods show their requests;
+      - nothing is Pending (in particular no API pod), and nothing is evicted.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.

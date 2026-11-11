@@ -6,7 +6,7 @@ SHELL := bash
 .PHONY: help up down plan wipe-db keep unkeep kind-up argocd-kind
 
 help:
-	@echo "make up            k3s on EC2 (Phase 4a): terraform apply, then Argo CD installs the rest. Costs ~\$$0.15/hr."
+	@echo "make up            k3s on EC2 (Phase 4a): terraform apply, then Argo CD installs the rest. Costs ~\$$0.19/hr."
 	@echo "make down          destroy the k3s environment (about \$$0/day; the database's backups stay)"
 	@echo "make wipe-db       delete the database's backups, so the next make up starts empty"
 	@echo "make plan          terraform plan for the k3s environment, no changes"

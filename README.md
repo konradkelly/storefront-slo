@@ -223,7 +223,7 @@ Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 
 ## Step 5: a real cloud cluster (k3s on EC2)
 
 `make up` builds the same system on three EC2 instances that you run yourself, and `make down` removes it. It
-costs about $0.15/hr while up, and a nightly workflow destroys it in case you forget. Setup, cost and what
+costs about $0.19/hr while up, and a nightly workflow destroys it in case you forget. Setup, cost and what
 changes compared with kind: [docs/k3s.md](docs/k3s.md).
 
 ## Lab-only settings and known gaps
