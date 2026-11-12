@@ -194,8 +194,19 @@ small. That led to the bigger server and the Argo CD requests above.
 
 The working set grew only because a bigger node keeps more file cache. The resident memory didn't change, and the
 kernel gives the cache back under pressure. Argo CD's pods had their requests, and the scheduler put the application
-controller on an agent. Nothing was Pending or evicted, and one API pod ran in each zone. The server's memory during
-a canary isn't checked yet.
+controller on an agent. Nothing was Pending or evicted, and one API pod ran in each zone.
+
+**Checked during a canary on 2026-11-12.** This was the step that started the spiral on 2026-11-06. The canary went
+to 20%, then 50%, and was promoted; its analysis passed. Sampled every minute on the server:
+
+| | During the canary |
+|---|---|
+| Free memory | 2808-2881 MiB |
+| k3s resident memory | 1776-2134 MiB (2560 MiB reserved) |
+| k3s working set | 3328-3658 MiB, mostly file cache |
+| Pending pods, evictions | 0, 0 |
+
+The Deployment stayed at 0, and the server ran two API pods throughout.
 
 ## What went well
 
@@ -229,7 +240,7 @@ a canary isn't checked yet.
 | Memory eviction threshold on every node (`eviction-hard=memory.available<300Mi`) | mitigate | | done, checked on 2026-11-11 |
 | Server on a t3.large (8 GiB), agents stay t3.medium. About $0.04/hr more | prevent | | done, checked on 2026-11-11 |
 | Memory requests for Argo CD's pods | prevent | | done, checked on 2026-11-11 |
-| Watch the server's memory during a canary | process | | [ROADMAP](../ROADMAP.md) |
+| Watch the server's memory during a canary | process | | done, checked on 2026-11-12 |
 | Send per-pod memory to Grafana Cloud (working set summed by pod: a few dozen series), so the next incident can name the biggest consumer | detect | | |
 | CoreDNS: two replicas, spread across nodes. From 2026-10-29, still open | prevent | | |
 | Route `Watchdog` to an external dead man's switch. From 2026-10-29, still open | detect | | |

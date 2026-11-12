@@ -542,7 +542,7 @@ myself" list are in [docs/k3s.md](k3s.md).
       From 2026-10-31 to 2026-11-06 every nightly destroy removed everything but the backup bucket, then failed: the
       CI role couldn't delete the bucket's encryption setting (403). With the bucket in `terraform/aws/bootstrap`
       the destroy no longer touches it. It succeeded on 2026-11-07, and the CI role can now only read the bucket.
-- [ ] **Resource spiral (2026-11-06): explained and fixed, not yet watched during a canary.** 20 minutes after
+- [x] **Resource spiral (2026-11-06): explained, fixed, and checked during a canary.** 20 minutes after
       `make up`, the server node ran out of memory and thrashed instead of killing a pod. The API server and the
       kubelet, one process in k3s, stopped answering for good at 00:19 UTC. `scaleDown: progressively` then scaled
       the old Deployment up to stand in for the Rollout's unready pods, putting more JVMs on that node. The agents
@@ -570,7 +570,11 @@ myself" list are in [docs/k3s.md](k3s.md).
       - Argo CD's pods had their requests, and the application controller went to an agent;
       - nothing was Pending or evicted, and one API pod ran in each zone.
 
-      Still to check: the server's memory during a canary.
+      Checked during a canary on 2026-11-12 (20%, then 50%, then promoted; the analysis passed), sampled every
+      minute:
+      - the server had 2808-2881 MiB free;
+      - k3s's resident memory stayed at 1776-2134 MiB, under the 2.5 GiB reserved;
+      - nothing was Pending or evicted, and the Deployment stayed at 0.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
