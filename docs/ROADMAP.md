@@ -542,7 +542,7 @@ myself" list are in [docs/k3s.md](k3s.md).
       From 2026-10-31 to 2026-11-06 every nightly destroy removed everything but the backup bucket, then failed: the
       CI role couldn't delete the bucket's encryption setting (403). With the bucket in `terraform/aws/bootstrap`
       the destroy no longer touches it. It succeeded on 2026-11-07, and the CI role can now only read the bucket.
-- [ ] **Resource spiral (2026-11-06): explained and fixed, the server's new size not yet checked.** 20 minutes after
+- [ ] **Resource spiral (2026-11-06): explained and fixed, not yet watched during a canary.** 20 minutes after
       `make up`, the server node ran out of memory and thrashed instead of killing a pod. The API server and the
       kubelet, one process in k3s, stopped answering for good at 00:19 UTC. `scaleDown: progressively` then scaled
       the old Deployment up to stand in for the Rollout's unready pods, putting more JVMs on that node. The agents
@@ -562,11 +562,15 @@ myself" list are in [docs/k3s.md](k3s.md).
 
       So the server is now a t3.large (8 GiB) with 2.5 GiB reserved, and Argo CD's pods have memory requests
       (`scripts/argocd-up.sh`). The API pods still spread over three zones.
-      To check on the next `make up`:
-      - the server is a t3.large, with allocatable memory of its capacity less 2.8 GiB;
-      - the k3s process stays under 2.5 GiB, including during a canary;
-      - Argo CD's pods show their requests;
-      - nothing is Pending (in particular no API pod), and nothing is evicted.
+      Checked on the t3.large, also on 2026-11-11:
+      - allocatable memory was 4960 MiB of 7820, and 3712 MiB was free after startup (the 4 GiB server had
+        509-800 MiB);
+      - k3s's resident memory was 1678 MiB, the same as on the 4 GiB server. Its working set was 2686 MiB, above
+        the reservation, but the extra is file cache the kernel gives back under pressure;
+      - Argo CD's pods had their requests, and the application controller went to an agent;
+      - nothing was Pending or evicted, and one API pod ran in each zone.
+
+      Still to check: the server's memory during a canary.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.

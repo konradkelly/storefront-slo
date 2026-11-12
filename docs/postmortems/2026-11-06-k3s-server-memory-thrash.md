@@ -183,6 +183,20 @@ them.
 But the k3s process used 1.9 GiB, and the server had 509-800 MiB free with no load, so the reservation was too
 small. That led to the bigger server and the Argo CD requests above.
 
+**Checked again on 2026-11-11, on the t3.large:**
+
+| | 4 GiB server, 1 GiB reserved | t3.large, 2.5 GiB reserved |
+|---|---|---|
+| Allocatable to pods | 2512 MiB | 4960 MiB |
+| Free after startup, no load | 509-800 MiB | 3712 MiB |
+| k3s resident memory | 1695 MiB | 1678 MiB |
+| k3s working set | 1913 MiB | 2686 MiB |
+
+The working set grew only because a bigger node keeps more file cache. The resident memory didn't change, and the
+kernel gives the cache back under pressure. Argo CD's pods had their requests, and the scheduler put the application
+controller on an agent. Nothing was Pending or evicted, and one API pod ran in each zone. The server's memory during
+a canary isn't checked yet.
+
 ## What went well
 
 - The probe alert fired 4 minutes after the first failure and stayed on all night.
@@ -211,11 +225,11 @@ small. That led to the bigger server and the Argo CD requests above.
 | Action | Type | Owner | Tracking |
 |--------|------|-------|----------|
 | `scaleDown: never`, and Argo CD enforces the Deployment's 0 replicas | prevent | | done, checked on 2026-11-11 |
-| Reserve memory for the k3s process on the server (`system-reserved`) | prevent | | done. 1 GiB was checked on 2026-11-11 and found too small; now 2.5 GiB on a t3.large, verify on the next `make up` |
+| Reserve memory for the k3s process on the server (`system-reserved`) | prevent | | done. 1 GiB was too small (checked 2026-11-11); 2.5 GiB on a t3.large checked the same day |
 | Memory eviction threshold on every node (`eviction-hard=memory.available<300Mi`) | mitigate | | done, checked on 2026-11-11 |
-| Server on a t3.large (8 GiB), agents stay t3.medium. About $0.04/hr more | prevent | | done in code, verify on the next `make up` |
-| Memory requests for Argo CD's pods | prevent | | done in code, verify on the next `make up` |
-| On the next `make up`, check: the k3s process stays under 2.5 GiB, including during a canary, and nothing is Pending (no API pod in particular) | process | | [ROADMAP](../ROADMAP.md) |
+| Server on a t3.large (8 GiB), agents stay t3.medium. About $0.04/hr more | prevent | | done, checked on 2026-11-11 |
+| Memory requests for Argo CD's pods | prevent | | done, checked on 2026-11-11 |
+| Watch the server's memory during a canary | process | | [ROADMAP](../ROADMAP.md) |
 | Send per-pod memory to Grafana Cloud (working set summed by pod: a few dozen series), so the next incident can name the biggest consumer | detect | | |
 | CoreDNS: two replicas, spread across nodes. From 2026-10-29, still open | prevent | | |
 | Route `Watchdog` to an external dead man's switch. From 2026-10-29, still open | detect | | |
