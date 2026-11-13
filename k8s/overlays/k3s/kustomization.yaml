@@ -15,6 +15,7 @@ kind: Kustomization
 resources:
   - ../../base
   - backups.yaml
+  - backup-alerts.yaml
 
 patches:
   # Ship WAL through the Barman Cloud plugin (installed by Argo CD, k8s/platform/values-k3s.yaml) to the ObjectStore in backups.yaml.

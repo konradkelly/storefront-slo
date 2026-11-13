@@ -89,13 +89,42 @@ step "Database: new, restored from S3, or the one already running"
 # database only archives into an empty folder, the archive moves from storefront-db/ to storefront-db-previous/ first.
 # The move copies everything before deleting anything, and deletes the backup.info files first, so a rerun after an
 # interruption never mistakes a half-moved archive for a complete one.
+#
+# A backup restores only if every WAL segment from its start to its end reached the archive. On 2026-11-12 one was
+# marked DONE without its last segment, because the old database had stopped archiving, and every restore failed
+# with "WAL ends before end of online backup": CloudNativePG restores the newest backup. So the backup.info of a
+# backup missing WAL moves to unrestorable/, which hides the backup from the restore, and the newest complete one
+# is used instead. With none complete, stop: falling back to an older archive would delete this one (below).
 archive="s3://$bucket/storefront-db"
-has_base_backup() { # a completed base backup in this archive folder
-  local f
-  for f in $(aws s3 ls "$archive/$1/base/" --recursive | awk '/backup\.info$/ {print $4}'); do
-    aws s3 cp "s3://$bucket/$f" - | grep -q '^status=DONE' && return 0
+wal_segments() { # $1 to $2, two segment names on one timeline. 16 MiB segments: 256 to each 4 GiB "log" number.
+  local tli=${1:0:8} n
+  for ((n = 16#${1:8:8} * 256 + 16#${1:16:8}; n <= 16#${2:8:8} * 256 + 16#${2:16:8}; n++)); do
+    printf '%s%08X%08X\n' "$tli" $((n / 256)) $((n % 256))
   done
-  return 1
+}
+has_base_backup() { # a completed base backup in this archive folder, with all its WAL archived
+  local f id info seg wals found=1 hidden=0
+  wals=$(aws s3 ls "$archive/$1/wals/" --recursive | awk '{print $4}' | sed 's#.*/##' || true)
+  for f in $(aws s3 ls "$archive/$1/base/" --recursive | awk '/backup\.info$/ {print $4}'); do
+    info=$(aws s3 cp "s3://$bucket/$f" -)
+    grep -q '^status=DONE' <<<"$info" || continue
+    id=$(basename "$(dirname "$f")")
+    for seg in $(wal_segments "$(sed -n 's/^begin_wal=//p' <<<"$info")" "$(sed -n 's/^end_wal=//p' <<<"$info")"); do
+      # A segment, compressed or not. Not a .partial, nor a backup's history file (<segment>.<offset>.backup).
+      grep -qxE "$seg(\.(gz|bz2|xz|lz4|zst|snappy))?" <<<"$wals" && continue
+      echo "Backup $id needs WAL $seg, which never reached $archive/$1: moving its backup.info to unrestorable/"
+      aws s3 mv "s3://$bucket/$f" "$archive/$1/unrestorable/$id.backup.info" --only-show-errors
+      hidden=1
+      continue 2
+    done
+    found=0
+  done
+  if [ "$found" = 1 ] && [ "$hidden" = 1 ]; then
+    echo "No backup in $archive/$1 has all its WAL. Stopping rather than restore an older archive and delete this" >&2
+    echo "one. Choose by hand: docs/k3s.md, \"Keeping the data\"." >&2
+    exit 1
+  fi
+  return "$found"
 }
 storefront_path=k8s/overlays/k3s
 if k -n storefront get cluster storefront-db >/dev/null 2>&1; then

@@ -581,6 +581,17 @@ myself" list are in [docs/k3s.md](k3s.md).
       operator's pod unblocked it. Fixed: Argo CD now counts a CRD as healthy only once it's served
       (`k8s/argocd/argocd-cm.yaml`), and the operator, Prometheus and Alertmanager sync one wave after the CRDs
       (`k8s/monitoring/kps-values.yaml`). Check: on the next `make up`, Prometheus starts without help.
+- [ ] **A DONE backup that couldn't be restored (2026-11-12): fixed, not yet checked on a new cluster.** The old
+      database's archiver stalled without counting a failure. The 03:00 base backup was marked DONE without its last
+      WAL segment, and the restore failed with "WAL ends before end of online backup" until that backup was hidden
+      by hand. Restoring the 23:25 backup lost nothing (the newest order was from 11-08). Fixed:
+      - `make up` sets aside any backup missing WAL, and stops if none is complete ([k3s.md](k3s.md#keeping-the-data));
+      - alert `PostgresWalArchivingStuck` fires on WAL waiting 15 minutes, with a
+        [runbook](runbooks/PostgresWalArchivingStuck.md);
+      - Grafana Cloud now gets the WAL waiting count and the sidecar's restarts.
+
+      Why the archiver stalled is unknown: its logs went with the cluster. One lead is the Barman Cloud sidecar's
+      256Mi memory limit during the 03:00 backup. Check: the alert's metric is scraped, and `make up` restores.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
