@@ -26,6 +26,22 @@ data:
       hs.message = "not synced yet"
     end
     return hs
+  # A CRD is healthy once the API server serves its kind (Established). Argo CD has no health check for CRDs, so a
+  # sync wave didn't wait for them. On 2026-11-12 the Prometheus CRD took 26 s, and the operator, applied in the same
+  # wave, started before it was served (k8s/monitoring/kps-values.yaml).
+  resource.customizations.health.apiextensions.k8s.io_CustomResourceDefinition: |
+    hs = {status = "Progressing", message = "waiting for the API server to serve it"}
+    if obj.status ~= nil and obj.status.conditions ~= nil then
+      for _, c in ipairs(obj.status.conditions) do
+        if c.type == "NamesAccepted" and c.status == "False" then
+          return {status = "Degraded", message = c.message}
+        end
+        if c.type == "Established" and c.status == "True" then
+          hs = {status = "Healthy", message = ""}
+        end
+      end
+    end
+    return hs
   # k8s/cluster/* build the Alertmanager config, dashboards and logger script from files that Docker Compose also
   # reads (alertmanager/, grafana/dashboards/). Kustomize refuses files outside the kustomization's directory unless
   # told otherwise.

@@ -21,7 +21,19 @@ defaultRules:
     kubeProxy: false
     windows: false
 
+# The operator checks which of its CRDs the API server serves once, when it starts, and never again. On 2026-11-12 it
+# started 4 s before the Prometheus CRD was served, ran no Prometheus controller, and Argo CD waited 30 minutes for a
+# Prometheus nothing would start. So the operator goes in wave 1, after the CRDs (wave 0, the default), and Argo CD
+# waits for those to be served first (the CRD health check in k8s/argocd/argocd-cm.yaml). The chart's CRDs can't be
+# annotated: Helm doesn't template its crds/ folder. The Prometheus and Alertmanager move with the operator, because
+# they're Progressing until it reconciles them, and Argo CD doesn't start a wave until the one before it is healthy.
+prometheusOperator:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+
 prometheus:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
   prometheusSpec:
     # The SLOs use a 28d window. A lab cluster rarely lives that long, but don't throw data away before then.
     # Storage is an emptyDir: a Prometheus pod restart starts from empty (fine for a lab).
@@ -38,6 +50,8 @@ prometheus:
         memory: 1500Mi
 
 alertmanager:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1" # with the operator, above
   alertmanagerSpec:
     # The config is alertmanager/alertmanager.yml plus its Slack template, shared with Compose. k8s/cluster/monitoring
     # builds this Secret from those files, so the chart doesn't generate one of its own.
