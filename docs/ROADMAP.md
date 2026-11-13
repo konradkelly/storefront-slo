@@ -590,8 +590,13 @@ myself" list are in [docs/k3s.md](k3s.md).
         [runbook](runbooks/PostgresWalArchivingStuck.md);
       - Grafana Cloud now gets the WAL waiting count and the sidecar's restarts.
 
-      Why the archiver stalled is unknown: its logs went with the cluster. One lead is the Barman Cloud sidecar's
-      256Mi memory limit during the 03:00 backup. Check: the alert's metric is scraped, and `make up` restores.
+      It happened again on the next cluster: the 2026-11-13 03:00 backup needs WAL up to 5F, and the archive ends at
+      5E. Both times the archiver had nothing to archive for hours (the database was idle), the scheduled 03:00
+      backup ended with a WAL switch, and that last segment was never archived; neither count moved. The backups
+      taken when each cluster was created were fine, and so was the archiving after them. Why is unknown: the logs
+      went with the clusters, and the sidecar's restarts weren't sent to Grafana Cloud. Next: on a new cluster, take
+      an on-demand backup once the database has been idle a while, and watch `pg_stat_archiver`, `archive_status`
+      and the sidecar's log. Check: the alert's metric is scraped, and `make up` restores.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
