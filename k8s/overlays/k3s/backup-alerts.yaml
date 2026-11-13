@@ -1,9 +1,10 @@
 # WAL that stops reaching S3 is silent: CloudNativePG keeps reporting the cluster healthy, and base backups still
-# finish as DONE. On 2026-11-12 the old database's archiver stalled for 3.5 hours before the nightly destroy. The 03:00
-# backup was marked DONE without its last WAL segment, and the next make up couldn't restore it (docs/k3s.md,
-# "Keeping the data"). Archived and failed counts both stayed flat, so a failure-count alert would have missed it.
-# A segment waiting in archive_status/*.ready catches a failing archiver and a hung one alike. Postgres closes
-# segments at least every 5 minutes (archive_timeout) and archiving takes seconds, so 15 minutes is a real backlog.
+# finish as DONE, though a restore needs their WAL. A closed segment waiting in archive_status/*.ready catches a
+# failing archiver (credentials, bucket) and a hung one alike; counting failures misses a hang. Archiving a segment
+# takes seconds, so 15 minutes is a real backlog.
+#
+# It wouldn't have caught 2026-11-12. Nothing was waiting then: the backup's last segment was still open on an
+# idle primary (backups.yaml, target).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

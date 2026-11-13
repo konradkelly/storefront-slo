@@ -581,22 +581,25 @@ myself" list are in [docs/k3s.md](k3s.md).
       operator's pod unblocked it. Fixed: Argo CD now counts a CRD as healthy only once it's served
       (`k8s/argocd/argocd-cm.yaml`), and the operator, Prometheus and Alertmanager sync one wave after the CRDs
       (`k8s/monitoring/kps-values.yaml`). Check: on the next `make up`, Prometheus starts without help.
-- [ ] **A DONE backup that couldn't be restored (2026-11-12): fixed, not yet checked on a new cluster.** The old
-      database's archiver stalled without counting a failure. The 03:00 base backup was marked DONE without its last
-      WAL segment, and the restore failed with "WAL ends before end of online backup" until that backup was hidden
-      by hand. Restoring the 23:25 backup lost nothing (the newest order was from 11-08). Fixed:
-      - `make up` sets aside any backup missing WAL, and stops if none is complete ([k3s.md](k3s.md#keeping-the-data));
-      - alert `PostgresWalArchivingStuck` fires on WAL waiting 15 minutes, with a
-        [runbook](runbooks/PostgresWalArchivingStuck.md);
-      - Grafana Cloud now gets the WAL waiting count and the sidecar's restarts.
+- [ ] **A DONE backup that couldn't be restored (2026-11-12): fixed, not yet checked on a new cluster.** The 03:00
+      base backup was marked DONE, but its last WAL segment wasn't in S3, and the restore failed with "WAL ends
+      before end of online backup" until that backup was hidden by hand. Restoring the 23:25 backup lost nothing (the
+      newest order was from 11-08). The next night's backup was the same.
 
-      It happened again on the next cluster: the 2026-11-13 03:00 backup needs WAL up to 5F, and the archive ends at
-      5E. Both times the archiver had nothing to archive for hours (the database was idle), the scheduled 03:00
-      backup ended with a WAL switch, and that last segment was never archived; neither count moved. The backups
-      taken when each cluster was created were fine, and so was the archiving after them. Why is unknown: the logs
-      went with the clusters, and the sidecar's restarts weren't sent to Grafana Cloud. Next: on a new cluster, take
-      an on-demand backup once the database has been idle a while, and watch `pg_stat_archiver`, `archive_status`
-      and the sidecar's log. Check: the alert's metric is scraped, and `make up` restores.
+      The cause, from the backup labels in `backup.info`: both 03:00 backups ran on the standby, CloudNativePG's
+      default; the ones taken at cluster creation ran on the primary, before the standby existed. A standby can't
+      switch WAL, so the backup ended inside the segment the primary was still writing. The database was idle, so
+      that segment was never closed and archived, and the nightly destroy came first. The archiver was fine: it had
+      nothing to archive, which is why its counts didn't move. A first guess blamed a stalled archiver. Fixed:
+      - the daily backup runs on the primary (`target: primary` in `k8s/overlays/k3s/backups.yaml`), whose
+        `pg_backup_stop` closes the segment;
+      - `make up` sets aside any backup missing WAL, and stops if none is complete ([k3s.md](k3s.md#keeping-the-data));
+      - alert `PostgresWalArchivingStuck` fires when a closed segment waits 15 minutes to be archived, with a
+        [runbook](runbooks/PostgresWalArchivingStuck.md). It covers a failing or hung archiver, not this;
+      - Grafana Cloud now gets the waiting-WAL count and the sidecar's restarts.
+
+      Check: after a night, the 03:00 backup's label says `BACKUP FROM: primary` and its last segment is in S3; the
+      next `make up` sets aside 20261113T030001 and restores.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.

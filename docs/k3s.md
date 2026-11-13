@@ -76,10 +76,11 @@ The database survives `make down`, the nightly destroy and Terraform replacing t
 its backups are in a bucket owned by `terraform/aws/bootstrap`, which none of those touch. When `make up` makes a new
 database and finds a completed base backup in the bucket, it restores from it instead of starting empty:
 
-1. It sets aside any backup that can't be restored. A backup needs every WAL segment from its start to its end. On
-   2026-11-12 one was marked DONE without its last segment, because the old database had stopped archiving hours
-   before, and every restore attempt failed with "WAL ends before end of online backup". Its `backup.info` moves to
-   `unrestorable/` in the same folder, which hides the backup from the restore.
+1. It sets aside any backup that can't be restored. A backup needs every WAL segment from its start to its end, and
+   on 2026-11-12 the newest one's last segment wasn't in S3: every restore attempt failed with "WAL ends before end
+   of online backup". Its `backup.info` moves to `unrestorable/` in the same folder, which hides the backup from the
+   restore. The restore replays every archived segment after whichever backup it starts from, so starting from an
+   older one loses nothing.
 2. It moves the archive from `storefront-db/` to `storefront-db-previous/` (copy, then delete). A new database only
    archives into an empty folder: on 2026-10-31 a new database couldn't archive at all ("Expected empty archive")
    until the old archive was deleted by hand.
@@ -90,8 +91,15 @@ If no completed backup in the newest archive has all its WAL, `make up` stops. G
 archive and delete this one. `unrestorable/` shows what was missing. Either start empty (`make wipe-db`), or move
 this archive to another folder (`aws s3 mv --recursive`) and rerun, which restores `storefront-db-previous`.
 
-While the cluster runs, `PostgresWalArchivingStuck` ([runbook](runbooks/PostgresWalArchivingStuck.md)) fires once
-WAL has waited 15 minutes to be archived. A stalled archiver then shows up within the hour, not at the next restore.
+That backup was taken on the standby, CloudNativePG's default, at 03:00 on an idle database, and the next night's
+was the same. A standby can't switch WAL, so the backup ended inside the segment the primary was still writing. With
+nothing written, that segment was never closed and archived before the nightly destroy. The daily backup now runs on
+the primary ([backups.yaml](../k8s/overlays/k3s/backups.yaml)), whose `pg_backup_stop` closes the segment so it's
+archived within seconds.
+
+While the cluster runs, `PostgresWalArchivingStuck` ([runbook](runbooks/PostgresWalArchivingStuck.md)) fires once a
+closed segment has waited 15 minutes to be archived, so a failing or hung archiver shows up then, not at the next
+restore.
 
 The instances are destroyed without warning, so the restored database is as of its last archived WAL segment.
 Postgres closes one at least every 5 minutes (`archive_timeout`), which puts the most you can lose at about 5 minutes

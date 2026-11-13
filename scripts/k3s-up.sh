@@ -90,11 +90,12 @@ step "Database: new, restored from S3, or the one already running"
 # The move copies everything before deleting anything, and deletes the backup.info files first, so a rerun after an
 # interruption never mistakes a half-moved archive for a complete one.
 #
-# A backup restores only if every WAL segment from its start to its end reached the archive. On 2026-11-12 one was
-# marked DONE without its last segment, because the old database had stopped archiving, and every restore failed
-# with "WAL ends before end of online backup": CloudNativePG restores the newest backup. So the backup.info of a
-# backup missing WAL moves to unrestorable/, which hides the backup from the restore, and the newest complete one
-# is used instead. With none complete, stop: falling back to an older archive would delete this one (below).
+# A backup restores only if every WAL segment from its start to its end reached the archive. On 2026-11-12 the newest
+# one's last segment hadn't: it was still open on the primary when the nightly destroy came (k8s/overlays/k3s/
+# backups.yaml, target). CloudNativePG restores the newest backup, so every restore failed with "WAL ends before end
+# of online backup". So the backup.info of a backup missing WAL moves to unrestorable/, which hides the backup from
+# the restore, and the newest complete one is used instead; the WAL replayed after it is the same. With none
+# complete, stop: falling back to an older archive would delete this one (below).
 archive="s3://$bucket/storefront-db"
 wal_segments() { # $1 to $2, two segment names on one timeline. 16 MiB segments: 256 to each 4 GiB "log" number.
   local tli=${1:0:8} n
