@@ -11,8 +11,8 @@
 # (Billing/Usage → Metrics), or in the cluster's Prometheus: prometheus_remote_storage_highest_timestamp_in_seconds
 # shows that sending works, and count({__name__=~"<keep regex>"}) approximates the series count.
 # Over the limit, Grafana Cloud drops samples. The free tier never bills.
-# The WAL waiting to be archived, and restarts of init containers (the Barman Cloud plugin runs as a native sidecar,
-# which is one), are here because on 2026-11-12 neither was, and the stalled archiver's cause died with the cluster.
+# The WAL waiting to be archived feeds PostgresWalArchivingStuck's history. Init container restarts cover the
+# Barman Cloud sidecar, which runs as a native sidecar (an init container), so its restarts weren't sent before.
 prometheus:
   prometheusSpec:
     remoteWrite:

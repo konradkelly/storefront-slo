@@ -8,12 +8,16 @@ had a WAL segment waiting to be archived to S3 for 15 minutes.
 Postgres hands each closed WAL segment to the Barman Cloud sidecar, which copies it to S3. Until that works again:
 
 - a restore loses every write after the last archived segment;
-- a base backup taken meanwhile can't be restored. The backup finishes as DONE, but its last segment never reaches
-  S3. On 2026-11-12 that broke the next `make up`'s restore ("WAL ends before end of online backup");
+- a base backup taken meanwhile can't be restored. The backup finishes as DONE, but its last segment isn't in S3,
+  and the restore fails with "WAL ends before end of online backup";
 - WAL piles up on the node's disk.
 
-CloudNativePG keeps reporting the cluster healthy, and the archiver may not count any failures: on 2026-11-12 its
-archived and failed counts both stayed flat for 3.5 hours.
+CloudNativePG keeps reporting the cluster healthy. A hung archive command counts no failures either, so
+`pg_stat_archiver` shows nothing at all.
+
+Not this alert: a backup whose last segment is still open on an idle primary. Nothing waits to be archived then, so
+this never fires. That's what broke the restores of 2026-11-12 and 11-13; the daily backup now runs on the primary
+(`k8s/overlays/k3s/backups.yaml`).
 
 ## First five minutes
 
@@ -39,7 +43,7 @@ archived and failed counts both stayed flat for 3.5 hours.
 | Cause | How to confirm | Mitigation |
 |-------|----------------|------------|
 | S3 credentials or bucket | `failed_count` rising, the sidecar logs AccessDenied or NoSuchBucket | Rerun `scripts/k3s-up.sh`, which recreates Secret `storefront-backup-s3` from Terraform. |
-| Sidecar killed for memory (256Mi limit in `backups.yaml`) | `lastState` shows OOMKilled, often during the 03:00 base backup | Raise the limit in `k8s/overlays/k3s/backups.yaml`. |
+| Sidecar killed for memory (256Mi limit in `backups.yaml`) | `lastState` shows OOMKilled | Raise the limit in `k8s/overlays/k3s/backups.yaml`. |
 | Archive command hung | Counts flat, sidecar running, nothing in its log | Delete the primary's pod. CloudNativePG fails over to the replica (or restarts the pod, with one instance), and the new primary archives. Check that `archived_count` moves. |
 | Plugin pod down | No running pod in `cnpg-system` | Find out why (node down, image pull). The sidecar can't archive without it. |
 
@@ -58,6 +62,7 @@ metadata:
 spec:
   cluster:
     name: storefront-db
+  target: primary # see k8s/overlays/k3s/backups.yaml
   method: plugin
   pluginConfiguration:
     name: barman-cloud.cloudnative-pg.io

@@ -53,6 +53,13 @@ spec:
   backupOwnerReference: self
   cluster:
     name: storefront-db
+  # On the primary, not the standby CloudNativePG prefers by default. A backup ends at a WAL position, and its
+  # restore needs the segment holding that position archived. The primary's pg_backup_stop switches WAL, so that
+  # segment is archived within seconds. A standby can't switch WAL: its backup ends inside the segment the primary
+  # is still writing, which is only archived once enough is written to fill it or archive_timeout closes it, and
+  # an idle database writes nothing. On 2026-11-12 and 2026-11-13 the 03:00 backup ran on the standby of an idle
+  # database, the nightly destroy came first, and the newest backup couldn't be restored (docs/k3s.md).
+  target: primary
   method: plugin
   pluginConfiguration:
     name: barman-cloud.cloudnative-pg.io
