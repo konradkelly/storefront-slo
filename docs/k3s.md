@@ -76,11 +76,22 @@ The database survives `make down`, the nightly destroy and Terraform replacing t
 its backups are in a bucket owned by `terraform/aws/bootstrap`, which none of those touch. When `make up` makes a new
 database and finds a completed base backup in the bucket, it restores from it instead of starting empty:
 
-1. It moves the archive from `storefront-db/` to `storefront-db-previous/` (copy, then delete). A new database only
+1. It sets aside any backup that can't be restored. A backup needs every WAL segment from its start to its end. On
+   2026-11-12 one was marked DONE without its last segment, because the old database had stopped archiving hours
+   before, and every restore attempt failed with "WAL ends before end of online backup". Its `backup.info` moves to
+   `unrestorable/` in the same folder, which hides the backup from the restore.
+2. It moves the archive from `storefront-db/` to `storefront-db-previous/` (copy, then delete). A new database only
    archives into an empty folder: on 2026-10-31 a new database couldn't archive at all ("Expected empty archive")
    until the old archive was deleted by hand.
-2. It points Argo CD at [k8s/overlays/k3s-restore](../k8s/overlays/k3s-restore), which bootstraps the Cluster by
-   recovery from `storefront-db-previous`: the latest base backup plus every archived WAL segment after it.
+3. It points Argo CD at [k8s/overlays/k3s-restore](../k8s/overlays/k3s-restore), which bootstraps the Cluster by
+   recovery from `storefront-db-previous`: the newest complete base backup plus every archived WAL segment after it.
+
+If no completed backup in the newest archive has all its WAL, `make up` stops. Going on would restore an older
+archive and delete this one. `unrestorable/` shows what was missing. Either start empty (`make wipe-db`), or move
+this archive to another folder (`aws s3 mv --recursive`) and rerun, which restores `storefront-db-previous`.
+
+While the cluster runs, `PostgresWalArchivingStuck` ([runbook](runbooks/PostgresWalArchivingStuck.md)) fires once
+WAL has waited 15 minutes to be archived. A stalled archiver then shows up within the hour, not at the next restore.
 
 The instances are destroyed without warning, so the restored database is as of its last archived WAL segment.
 Postgres closes one at least every 5 minutes (`archive_timeout`), which puts the most you can lose at about 5 minutes

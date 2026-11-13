@@ -11,6 +11,8 @@
 # (Billing/Usage → Metrics), or in the cluster's Prometheus: prometheus_remote_storage_highest_timestamp_in_seconds
 # shows that sending works, and count({__name__=~"<keep regex>"}) approximates the series count.
 # Over the limit, Grafana Cloud drops samples. The free tier never bills.
+# The WAL waiting to be archived, and restarts of init containers (the Barman Cloud plugin runs as a native sidecar,
+# which is one), are here because on 2026-11-12 neither was, and the stalled archiver's cause died with the cluster.
 prometheus:
   prometheusSpec:
     remoteWrite:
@@ -26,7 +28,7 @@ prometheus:
           - sourceLabels: [__name__]
             action: keep
             regex: >-
-              slo:.*|ALERTS|up|storefront_.*|k6_http_reqs_total|http_server_requests_seconds_(bucket|count|sum)|hikaricp_connections_(active|pending)|kube_pod_container_status_restarts_total|node_memory_Mem(Available|Total)_bytes|node_filesystem_(avail|size)_bytes|node_cpu_seconds_total|cnpg_collector_up|cnpg_pg_replication_lag|cnpg_pg_stat_archiver_.*
+              slo:.*|ALERTS|up|storefront_.*|k6_http_reqs_total|http_server_requests_seconds_(bucket|count|sum)|hikaricp_connections_(active|pending)|kube_pod_(init_)?container_status_restarts_total|node_memory_Mem(Available|Total)_bytes|node_filesystem_(avail|size)_bytes|node_cpu_seconds_total|cnpg_collector_(up|pg_wal_archive_status)|cnpg_pg_replication_lag|cnpg_pg_stat_archiver_.*
           # Probes and scrapes hit /actuator every few seconds. They're not customer traffic and no SLO counts them.
           - sourceLabels: [__name__, uri]
             action: drop

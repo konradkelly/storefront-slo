@@ -3,9 +3,10 @@
 # don't). It first moves that archive from storefront-db/ to storefront-db-previous/, because a new database only
 # archives into an empty folder ("Expected empty archive"). See docs/k3s.md.
 #
-# Recovery replays every archived WAL segment after the latest base backup, so the database comes back as of its last
-# archived transaction. Bootstrap only runs when the Cluster is created; after that this overlay is k3s's, and
-# k3s-up.sh keeps it for as long as this database exists.
+# Recovery replays every archived WAL segment after the newest base backup, so the database comes back as of its last
+# archived transaction. k3s-up.sh first hides any backup whose own WAL is missing (moves its backup.info to
+# unrestorable/): CloudNativePG would pick it as the newest, and fail. Bootstrap only runs when the Cluster is
+# created; after that this overlay is k3s's, and k3s-up.sh keeps it for as long as this database exists.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
