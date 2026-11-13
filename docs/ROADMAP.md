@@ -575,6 +575,12 @@ myself" list are in [docs/k3s.md](k3s.md).
       - the server had 2808-2881 MiB free;
       - k3s's resident memory stayed at 1776-2134 MiB, under the 2.5 GiB reserved;
       - nothing was Pending or evicted, and the Deployment stayed at 0.
+- [ ] **Prometheus operator started before its CRD (2026-11-12): fixed, not yet checked on a new cluster.** The
+      operator checks which CRDs are served once, at startup. It started 4 s before the Prometheus CRD was, ran no
+      Prometheus controller, and `make up` waited 30 minutes for a Prometheus nothing would start. Deleting the
+      operator's pod unblocked it. Fixed: Argo CD now counts a CRD as healthy only once it's served
+      (`k8s/argocd/argocd-cm.yaml`), and the operator, Prometheus and Alertmanager sync one wave after the CRDs
+      (`k8s/monitoring/kps-values.yaml`). Check: on the next `make up`, Prometheus starts without help.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
