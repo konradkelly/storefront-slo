@@ -575,12 +575,14 @@ myself" list are in [docs/k3s.md](k3s.md).
       - the server had 2808-2881 MiB free;
       - k3s's resident memory stayed at 1776-2134 MiB, under the 2.5 GiB reserved;
       - nothing was Pending or evicted, and the Deployment stayed at 0.
-- [ ] **Prometheus operator started before its CRD (2026-11-12): fixed, not yet checked on a new cluster.** The
-      operator checks which CRDs are served once, at startup. It started 4 s before the Prometheus CRD was, ran no
-      Prometheus controller, and `make up` waited 30 minutes for a Prometheus nothing would start. Deleting the
-      operator's pod unblocked it. Fixed: Argo CD now counts a CRD as healthy only once it's served
-      (`k8s/argocd/argocd-cm.yaml`), and the operator, Prometheus and Alertmanager sync one wave after the CRDs
-      (`k8s/monitoring/kps-values.yaml`). Check: on the next `make up`, Prometheus starts without help.
+- [x] **Prometheus operator started before its CRD (2026-11-12): fixed and checked.** The operator checks which
+      CRDs are served once, at startup. It started 4 s before the Prometheus CRD was, ran no Prometheus controller,
+      and `make up` waited 30 minutes for a Prometheus nothing would start. Deleting the operator's pod unblocked it.
+      Fixed: the operator, Prometheus and Alertmanager sync one wave after the CRDs
+      (`k8s/monitoring/kps-values.yaml`). Argo CD's built-in CRD health check makes that wave wait until they're
+      served. A first version also added a CRD health check to `argocd-cm`, wrongly thinking Argo CD had none.
+      Checked on 2026-11-20: the CRD was served at 20:09:36 UTC and the operator started at 20:10:44, with its
+      Prometheus controller running. Every app was Synced and Healthy 8 minutes after Argo CD started, with no help.
 - [ ] **A DONE backup that couldn't be restored (2026-11-12): fixed, not yet checked on a new cluster.** The 03:00
       base backup was marked DONE, but its last WAL segment wasn't in S3, and the restore failed with "WAL ends
       before end of online backup" until that backup was hidden by hand. Restoring the 23:25 backup lost nothing (the
@@ -598,8 +600,11 @@ myself" list are in [docs/k3s.md](k3s.md).
         [runbook](runbooks/PostgresWalArchivingStuck.md). It covers a failing or hung archiver, not this;
       - Grafana Cloud now gets the waiting-WAL count and the sidecar's restarts.
 
-      Check: after a night, the 03:00 backup's label says `BACKUP FROM: primary` and its last segment is in S3; the
-      next `make up` sets aside 20261113T030001 and restores.
+      Checked on 2026-11-20:
+      - `make up` set aside 20261113T030001 and restored the 22:29 backup. All 3885 orders were back;
+      - the alert's rule was loaded, and its metric reached Grafana Cloud.
+
+      Still to check: the 03:00 UTC backup's label says `BACKUP FROM: primary`, and its last segment is in S3.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
