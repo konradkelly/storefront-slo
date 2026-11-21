@@ -652,9 +652,12 @@ Decided on 2026-11-21:
 
 Details are in [eks.md](eks.md).
 
-- [ ] **Slice 1, the cluster** (`terraform/aws/eks`, `make eks-up` / `make eks-down`, the nightly destroy): VPC,
+- [x] **Slice 1, the cluster** (`terraform/aws/eks`, `make eks-up` / `make eks-down`, the nightly destroy): VPC,
       EKS 1.35, 3 × t3.medium, VPC CNI with prefix delegation and NetworkPolicy, CoreDNS, kube-proxy, Pod Identity
-      agent, EBS CSI driver. Written and planned (37 resources); not yet applied.
+      agent, EBS CSI driver. Checked on 2026-11-21 ([eks.md](eks.md#checked-on-2026-11-21)):
+      - 40 pods and 3,293 MiB allocatable per node, and two CoreDNS replicas in different zones;
+      - an EBS volume through Pod Identity, egress through the NAT, and NetworkPolicy enforced;
+      - the nightly destroy removed all 37 resources and the test volume in 8.5 minutes.
 - [ ] **Slice 2, the platform:** Argo CD and `k8s/platform` on EKS (`values-eks.yaml`), `overlays/eks` as a patch on
       the same base, a gp3 StorageClass, the AWS Load Balancer Controller, backups through Pod Identity. The diff
       between the k3s and EKS overlays is itself documentation of what changed.

@@ -44,8 +44,9 @@ variable "max_pods" {
   description = <<-EOT
     Pods per node. Without prefix delegation the VPC CNI fits 17 on a t3.medium (one IP per pod, limited by ENIs),
     and this stack needs about 22 per node: 43 pods on k3s, plus EKS's per-node agents and a scaled-up canary. With
-    prefix delegation it could be 110, but the EKS AMI reserves memory for the kubelet per possible pod
-    (255 MiB + 11 MiB x max pods): 1.4 GiB of a 4 GiB node at 110, 695 MiB at 40.
+    prefix delegation it could be 110. 40 leaves room over 22 without letting one node take more pods than its
+    3.3 GiB can hold. It doesn't change the kubelet's memory reservation: on 2026-11-21 each node reserved 542 MiB,
+    which is 255 MiB + 11 MiB x 17 pods (the ENI limit) plus the 100 MiB eviction threshold.
   EOT
 }
 

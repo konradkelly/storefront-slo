@@ -4,7 +4,7 @@ The same storefront on Amazon EKS, replacing the pieces k3s made us run ourselve
 run myself"). It's being built in slices, each working before the next
 ([ROADMAP](ROADMAP.md#phase-4b-migrate-to-eks-later-sprint)):
 
-1. **The cluster**: network, control plane, nodes, EKS add-ons, nightly destroy. *Written; not yet applied.*
+1. **The cluster**: network, control plane, nodes, EKS add-ons, nightly destroy. *Done, checked on 2026-11-21 (below).*
 2. The platform: Argo CD and `k8s/platform` on EKS, Envoy Gateway behind a Network Load Balancer, Postgres on EBS,
    backups through Pod Identity instead of a static key.
 3. The database: the EKS database as a replica of the k3s archive in S3, and a cutover rehearsal.
@@ -59,7 +59,7 @@ gateway is most of the difference. Slice 2 adds a Network Load Balancer (about $
 | **Kubernetes 1.35** | 1.34 (kind, k3s) leaves standard support on 2026-12-01, and extended support is $0.60/hr. 1.35 is supported until 2027-03-26, and one minor ahead is within the version skew policy. | kind and k3s are one minor behind until all three are upgraded. |
 | **`upgrade_policy: STANDARD`** | At the end of standard support EKS upgrades the cluster instead of charging for extended support. | An upgrade you didn't choose, if one is ever left that long. |
 | **Managed node group**, 3 × t3.medium, one per zone | AWS replaces and upgrades the nodes. | No autoscaling beyond 3 nodes. Karpenter is a later step. |
-| **Prefix delegation, 40 pods per node** | Without it the VPC CNI fits 17 pods on a t3.medium; this stack needs about 22 per node. | The EKS AMI reserves kubelet memory per possible pod: about 700 MiB per node at 40, 1.4 GiB at 110. |
+| **Prefix delegation, 40 pods per node** | Without it the VPC CNI fits 17 pods on a t3.medium; this stack needs about 22 per node. 40 leaves room without letting one node take more pods than its memory holds. | Nothing measurable: each node reserves 542 MiB either way, sized for 17 pods, and has 3,293 MiB allocatable. |
 | **IMDSv2 with hop limit 1** | Pods can't reach the node's IAM role, as on k3s. | Controllers that read instance metadata need their region and VPC passed in (the load balancer controller, slice 2). |
 | **EKS Pod Identity** for workloads | Short-lived credentials per service account; the EBS CSI driver uses it now, and the backup sidecar will instead of a static key. | Nothing. |
 | **NetworkPolicy by the VPC CNI** | k3s enforced it with kube-router, kind with Calico. | To check with `scripts/netpol-check.sh` once the platform runs. |
@@ -76,3 +76,24 @@ what they left, by the tags they put on it, destroys the rest, and finally delet
 `storefront/cluster=storefront-eks`. It uses AWS APIs only, so the nightly destroy runs the same script.
 
 Postgres's volumes go too, as on k3s: what survives is its archive in S3.
+
+## Checked on 2026-11-21
+
+The first `make eks-up` created all 37 resources, and every node was Ready in its zone:
+
+- **Nodes:** one t3.medium in each of us-east-1a, 1b and 1c, on Kubernetes 1.35.9. Each allows 40 pods (the
+  launch template's NodeConfig survived EKS merging in its own) and has 3,293 MiB of its 3,834 MiB allocatable.
+- **Add-ons:** all five ACTIVE at the pinned versions. CoreDNS ran two replicas, on nodes in different zones, and
+  every `aws-node` pod ran its NetworkPolicy agent.
+- **Instance metadata:** IMDSv2 required with a hop limit of 1, and no public IPs on the nodes.
+- **Storage:** a test claim got an encrypted 1 GiB gp3 volume, created through Pod Identity, tagged
+  `storefront/cluster=storefront-eks`, and a pod wrote to it. So the EBS driver works with pods kept away from
+  instance metadata.
+- **Egress:** a pod's outbound address was the NAT gateway's.
+- **NetworkPolicy:** a deny-all ingress policy blocked the next request between two pods, and removing it let
+  traffic through again.
+
+Then the nightly destroy workflow, started by hand, destroyed it in 8.5 minutes with the CI role's permissions. It
+destroyed all 37 resources and deleted the test claim's volume once the nodes had freed it. Afterwards AWS had no
+cluster, VPC, NAT gateway, Elastic IP, instance, tagged volume, network interface, launch template or `storefront-eks`
+IAM role left. The load balancer cleanup will first run for real in slice 2, when there's a load balancer.
