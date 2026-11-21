@@ -583,7 +583,7 @@ myself" list are in [docs/k3s.md](k3s.md).
       served. A first version also added a CRD health check to `argocd-cm`, wrongly thinking Argo CD had none.
       Checked on 2026-11-20: the CRD was served at 20:09:36 UTC and the operator started at 20:10:44, with its
       Prometheus controller running. Every app was Synced and Healthy 8 minutes after Argo CD started, with no help.
-- [ ] **A DONE backup that couldn't be restored (2026-11-12): fixed, not yet checked on a new cluster.** The 03:00
+- [x] **A DONE backup that couldn't be restored (2026-11-12): fixed and checked.** The 03:00
       base backup was marked DONE, but its last WAL segment wasn't in S3, and the restore failed with "WAL ends
       before end of online backup" until that backup was hidden by hand. Restoring the 23:25 backup lost nothing (the
       newest order was from 11-08). The next night's backup was the same.
@@ -600,11 +600,12 @@ myself" list are in [docs/k3s.md](k3s.md).
         [runbook](runbooks/PostgresWalArchivingStuck.md). It covers a failing or hung archiver, not this;
       - Grafana Cloud now gets the waiting-WAL count and the sidecar's restarts.
 
-      Checked on 2026-11-20:
+      Checked on 2026-11-20 and 11-21:
       - `make up` set aside 20261113T030001 and restored the 22:29 backup. All 3885 orders were back;
-      - the alert's rule was loaded, and its metric reached Grafana Cloud.
-
-      Still to check: the 03:00 UTC backup's label says `BACKUP FROM: primary`, and its last segment is in S3.
+      - the alert's rule was loaded, and its metric reached Grafana Cloud;
+      - the 03:00 UTC backup (20261121T030002) ran on the primary (`BACKUP FROM: primary`) after 6.5 idle hours.
+        Its one segment, 67, and its history file reached S3 1.3 s after it ended;
+      - no WAL waited to be archived all evening, and the alert never fired.
 
 **Done when:** `make up` goes from an empty account to a working storefront with SLO dashboards and alerts,
 `make down` returns the account to $0 per day, and the "what I had to run myself" list is written.
