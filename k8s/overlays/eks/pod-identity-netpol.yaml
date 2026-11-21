@@ -1,0 +1,19 @@
+# EKS Pod Identity: the agent on each node hands out credentials at 169.254.170.23, port 80. The Postgres pods' policy
+# (k8s/base/networkpolicy.yaml) only lets them reach each other and port 443, so the Barman Cloud sidecar couldn't get
+# its credentials, and every upload to S3 would fail. NetworkPolicies add up, so this one allows exactly that.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storefront-db-pod-identity
+  namespace: storefront
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: storefront-db
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 169.254.170.23/32
+      ports:
+        - { protocol: TCP, port: 80 }

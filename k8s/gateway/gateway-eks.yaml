@@ -1,0 +1,80 @@
+# The cluster's front door on EKS: the same Gateway as kind and k3s (gateway.yaml, gateway-k3s.yaml), with a
+# different way in.
+#
+# Envoy Gateway makes a Service of type LoadBalancer for the Gateway. loadBalancerClass service.k8s.aws/nlb hands it to
+# the AWS Load Balancer Controller (k8s/monitoring/aws-lbc-values.yaml), which makes an internet-facing Network Load
+# Balancer in the public subnets:
+#   - target type ip: the NLB sends straight to the Envoy pods' addresses (the VPC CNI gives pods real VPC addresses),
+#     not through a port on every node as on k3s;
+#   - cross-zone: two Envoy pods across three zones leave one zone without one, and the monitoring hostnames use one
+#     of the NLB's three addresses, so every address must reach every pod;
+#   - its Elastic IPs and the addresses allowed in come per run from the cluster-config Application
+#     (k8s/platform/templates/cluster-config.yaml).
+# Routing is still Envoy's: the HTTPRoutes and the canary's traffic split are unchanged. The NLB only gets packets in.
+# The controller creates it outside Terraform, so scripts/eks-down.sh deletes it by its tags.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: eks-nlb
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        loadBalancerClass: service.k8s.aws/nlb
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+          service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+          service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+      envoyDeployment:
+        replicas: 2
+        pod:
+          # Different zones when possible, so losing a zone leaves one Envoy. Not required: with a zone down, a
+          # replacement pod should still start somewhere.
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  gateway.envoyproxy.io/owning-gateway-name: storefront
+                  gateway.envoyproxy.io/owning-gateway-namespace: gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: eks-nlb
+    namespace: envoy-gateway-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: storefront
+  namespace: gateway
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [storefront, monitoring]

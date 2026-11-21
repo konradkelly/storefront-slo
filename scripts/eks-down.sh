@@ -4,13 +4,16 @@
 #
 # Also run nightly by .github/workflows/k3s-nightly-destroy.yml, so it uses AWS APIs only, never kubectl.
 #
-# Kubernetes creates AWS resources that Terraform doesn't own: load balancers (AWS Load Balancer Controller), EBS
-# volumes (EBS CSI driver), and network interfaces (VPC CNI). A load balancer or interface left in a subnet stops
-# the VPC from being deleted, and a volume left behind keeps costing money. So, in order:
+# Kubernetes creates AWS resources that Terraform doesn't own: load balancers and their security groups (AWS Load
+# Balancer Controller), EBS volumes (EBS CSI driver), and network interfaces (VPC CNI). A load balancer, security group
+# or interface left behind stops the VPC from being deleted, and a volume keeps costing money. So, in order:
 #   1. delete the nodes, which stops those controllers from creating anything new;
-#   2. delete what they left, found by the tags they put on it;
-#   3. destroy everything else;
-#   4. delete volumes that only came free when the cluster went.
+#   2. delete the load balancers and target groups, found by the tag the controller puts on them;
+#   3. destroy the cluster. The controller added rules to the cluster's security group that point at its own groups,
+#      and AWS won't delete a group something still points at. Destroying the cluster deletes that group and its rules;
+#   4. delete the controller's security groups and the interfaces the VPC CNI left;
+#   5. destroy everything else (the VPC, NAT gateway, Elastic IPs, IAM);
+#   6. delete volumes that only came free when the nodes went.
 # Postgres's volumes go too, as on k3s: its backups in S3 are what survive (docs/eks.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -36,7 +39,7 @@ if tf state list | grep -qx 'aws_eks_node_group.main'; then
   tf destroy -input=false -auto-approve -target=aws_eks_node_group.main
 fi
 
-echo "== Load balancers, target groups and security groups the load balancer controller left"
+echo "== Load balancers and target groups the load balancer controller left"
 for lb in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text); do
   if [ "$(lbc_cluster_tag "$lb")" = "$cluster" ]; then
     echo "deleting load balancer $lb"
@@ -50,12 +53,24 @@ for tg in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroup
     aws elbv2 delete-target-group --target-group-arn "$tg"
   fi
 done
+
+if tf state list | grep -qx 'aws_eks_cluster.main'; then
+  echo "== The cluster, and with it the security group that points at the controller's"
+  tf destroy -input=false -auto-approve -target=aws_eks_cluster.main
+fi
+
 if [ -n "$vpc" ]; then
+  echo "== Security groups the load balancer controller left"
   for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" \
       "Name=tag:elbv2.k8s.aws/cluster,Values=$cluster" --query 'SecurityGroups[].GroupId' --output text); do
     echo "deleting security group $sg"
-    # A deleted load balancer's interfaces can take a minute to release the group.
-    for _ in $(seq 12); do aws ec2 delete-security-group --group-id "$sg" 2>/dev/null && break; sleep 10; done
+    # A deleted load balancer's interfaces can take a minute or two to let go of the group.
+    deleted=false
+    for _ in $(seq 18); do
+      aws ec2 delete-security-group --group-id "$sg" 2>/dev/null && { deleted=true; break; }
+      sleep 10
+    done
+    $deleted || echo "WARNING: $sg is still in use after 3 minutes; deleting the VPC will fail until it's gone"
   done
   echo "== Network interfaces the VPC CNI left"
   for eni in $(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$vpc" "Name=status,Values=available" \

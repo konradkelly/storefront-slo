@@ -1,0 +1,10 @@
+# Added to kps-values.yaml on EKS (k8s/platform/values-eks.yaml).
+prometheus:
+  prometheusSpec:
+    # Attached to everything this Prometheus sends out: remote-written series (k8s/platform/files/kps-remote-write.yaml)
+    # and alerts. In Grafana Cloud it tells EKS apart from k3s-aws, which matters most during the cutover, when both
+    # send at once.
+    externalLabels:
+      cluster: eks-aws
+# No Grafana image renderer: the hourly dashboard snapshots (k8s/monitoring/grafana-snapshots.yaml) are k3s only so
+# far. On EKS the upload would use Pod Identity instead of the static key.

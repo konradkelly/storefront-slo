@@ -25,6 +25,26 @@ create_slack_secret() {
   k -n monitoring create secret generic alertmanager-slack "${secret_args[@]}" --dry-run=client -o yaml | k apply -f -
 }
 
+# k3s and EKS: Grafana Cloud remote write keeps a curated set of metrics after the cluster is gone
+# (k8s/platform/files/kps-remote-write.yaml). Sets gc_url, which argocd-up.sh passes on as GRAFANA_CLOUD_URL; empty
+# when k8s/monitoring/secrets/grafana-cloud.env doesn't exist.
+create_grafana_cloud_secret() {
+  local gc_env=k8s/monitoring/secrets/grafana-cloud.env gc_user gc_token gc_creds
+  gc_url=
+  if [ -s "$gc_env" ]; then
+    gc() { sed -n "s/^$1=//p" "$gc_env" | tr -d '\r' | tail -1; }
+    gc_url=$(gc GRAFANA_CLOUD_PROM_URL) gc_user=$(gc GRAFANA_CLOUD_PROM_USER) gc_token=$(gc GRAFANA_CLOUD_TOKEN)
+    [ -n "$gc_url" ] && [ -n "$gc_user" ] && [ -n "$gc_token" ] || { echo "$gc_env needs GRAFANA_CLOUD_PROM_URL, _USER and _TOKEN"; exit 1; }
+    gc_creds=$(mktemp)
+    (umask 077 && printf 'username=%s\npassword=%s\n' "$gc_user" "$gc_token" > "$gc_creds")
+    k -n monitoring create secret generic grafana-cloud --from-env-file="$gc_creds" --dry-run=client -o yaml | k apply -f -
+    rm -f "$gc_creds"
+    echo "Sending curated metrics to $gc_url"
+  else
+    echo "No $gc_env: metrics stay in the cluster and are gone after it (see k8s/monitoring/secrets/README.md)"
+  fi
+}
+
 # kind only: a pull-through cache per registry, so a rebuilt cluster pulls ~4 GB of images from local disk instead of
 # the internet (37 minutes on 2026-10-31, almost all of it pulls). The caches are containers on the host's Docker,
 # outside the cluster, so `kind delete cluster` keeps them; each stores its images in a named volume. Remove them

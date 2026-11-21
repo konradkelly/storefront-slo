@@ -1,14 +1,20 @@
 # Defaults for every cluster. values-<cluster>.yaml overrides them, and scripts/argocd-up.sh sets the per-run values
-# (revision, domain, grafanaCloudUrl) on the root Application.
+# (revision, domain, grafanaCloudUrl, and on EKS vpcId, nlbEipAllocations, adminCidrs) on the root Application.
 
 repoURL: https://github.com/konradkelly/storefront-slo.git
 # The git revision every child app tracks. REVISION=<branch> bash scripts/argocd-up.sh tries a pushed branch.
 revision: main
 
-# k3s only, set by scripts/k3s-up.sh: the monitoring UIs answer on <name>.<domain> (<server IP>.sslip.io), and
-# grafanaCloudUrl turns on remote write (files/kps-remote-write.yaml). Empty on kind.
+# k3s and EKS, set by scripts/k3s-up.sh and eks-up.sh: the monitoring UIs answer on <name>.<domain>
+# (<public IP>.sslip.io), and grafanaCloudUrl turns on remote write (files/kps-remote-write.yaml). Empty on kind.
 domain: ""
 grafanaCloudUrl: ""
+
+# EKS only, from terraform/aws/eks: the VPC the load balancer controller works in (it can't read it from instance
+# metadata), the NLB's Elastic IPs (comma-separated allocation IDs), and who may reach the NLB.
+vpcId: ""
+nlbEipAllocations: ""
+adminCidrs: []
 
 # The storefront app (an overlay of k8s/base) and the cluster's own manifests (k8s/cluster/<cluster>).
 storefrontPath: k8s/overlays/kind-gitops
@@ -97,3 +103,13 @@ charts:
     release: barman-cloud
     namespace: cnpg-system
     wave: -2
+  # EKS: turns the Gateway's LoadBalancer Service into a Network Load Balancer (k8s/gateway/gateway-eks.yaml). Wave -2,
+  # so it runs before cluster-config creates the Gateway. Its IAM policy is pinned with it (terraform/aws/eks).
+  aws-load-balancer-controller:
+    enabled: false
+    repo: https://aws.github.io/eks-charts
+    version: 3.6.3 # controller v3.6.3; the chart version matches since v3
+    release: aws-load-balancer-controller
+    namespace: kube-system
+    wave: -2
+    values: [k8s/monitoring/aws-lbc-values.yaml]

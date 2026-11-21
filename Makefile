@@ -14,7 +14,7 @@ help:
 	@echo "make unkeep        nightly destroy applies again"
 	@echo "make kind-up       local kind lab (Argo CD installs everything from GitHub main; REVISION=<branch> to change)"
 	@echo "make argocd-kind   rerun only the Argo CD step on the kind lab"
-	@echo "make eks-up        EKS (Phase 4b): VPC with a NAT gateway, control plane, 3 nodes. Costs ~\$$0.28/hr."
+	@echo "make eks-up        EKS (Phase 4b): cluster, then Argo CD installs the rest behind an NLB. Costs ~\$$0.33/hr."
 	@echo "make eks-down      destroy the EKS environment, including volumes and load balancers Kubernetes made"
 	@echo "make eks-plan      terraform plan for the EKS environment, no changes"
 

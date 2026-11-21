@@ -40,6 +40,11 @@ spec:
         values: |
           {{- $.Files.Get "files/kps-remote-write.yaml" | replace "GRAFANA_CLOUD_PROM_URL" $.Values.grafanaCloudUrl | nindent 10 }}
         {{- end }}
+        {{- if and (eq $name "aws-load-balancer-controller") $.Values.vpcId }}
+        # Per run: every make eks-up makes a new VPC (terraform/aws/eks).
+        values: |
+          vpcId: {{ $.Values.vpcId }}
+        {{- end }}
     {{- if $c.values }}
     - repoURL: {{ $.Values.repoURL }}
       targetRevision: {{ $.Values.revision }}

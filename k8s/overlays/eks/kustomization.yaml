@@ -1,0 +1,31 @@
+# EKS (Phase 4b, terraform/aws/eks). Argo CD syncs this overlay (k8s/platform/values-eks.yaml).
+#
+# Built on the k3s overlay, so this file is exactly what EKS changes. It inherits the GHCR image the release workflow
+# writes there, the S3 backups and their alert, and the payment fault knob. What differs:
+#   - backups use the Pod Identity role terraform/aws/eks/platform.tf gives the Postgres pods' service account, not a
+#     static access key in a Secret, so there's no storefront-backup-s3 Secret here;
+#   - they go to eks/ in the same bucket, where that role may write, so the EKS database never touches the k3s
+#     archive (storefront-db/). In slice 3 the EKS database starts as a replica of that archive (docs/eks.md);
+#   - the Postgres pods may reach the Pod Identity agent (pod-identity-netpol.yaml).
+# Volumes come from the cluster's default StorageClass, gp3 on EBS (k8s/cluster/eks/storageclass.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../k3s
+  - pod-identity-netpol.yaml
+
+patches:
+  - target:
+      kind: ObjectStore
+      name: storefront-backups
+    patch: |-
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: s3://storefront-k3s-backups-675901257165/eks
+      # No region: it can only come from a Secret alongside inheritFromIAMRole, and the bucket is in us-east-1,
+      # where S3 clients default to.
+      - op: replace
+        path: /spec/configuration/s3Credentials
+        value:
+          inheritFromIAMRole: true

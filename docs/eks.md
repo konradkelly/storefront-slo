@@ -5,15 +5,19 @@ run myself"). It's being built in slices, each working before the next
 ([ROADMAP](ROADMAP.md#phase-4b-migrate-to-eks-later-sprint)):
 
 1. **The cluster**: network, control plane, nodes, EKS add-ons, nightly destroy. *Done, checked on 2026-11-21 (below).*
-2. The platform: Argo CD and `k8s/platform` on EKS, Envoy Gateway behind a Network Load Balancer, Postgres on EBS,
-   backups through Pod Identity instead of a static key.
+2. **The platform**: Argo CD and `k8s/platform` on EKS, Envoy Gateway behind a Network Load Balancer, Postgres on
+   EBS, backups through Pod Identity instead of a static key. *Written; not yet applied.*
 3. The database: the EKS database as a replica of the k3s archive in S3, and a cutover rehearsal.
 4. External Secrets, for the Secrets `make up` still creates from local files.
 5. The cutover: a domain, weighted DNS (10% → 50% → 100%), then the zone-failure experiment.
 
 ```
 terraform/aws/bootstrap   once: state and backup buckets, budget, the CI role (now also allowed to destroy EKS)
-terraform/aws/eks         make eks-up / make eks-down: VPC, EKS control plane, node group, add-ons
+terraform/aws/eks         make eks-up / make eks-down: VPC, EKS control plane, node group, add-ons, the NLB's
+                          Elastic IPs, Pod Identity roles
+k8s/platform              values-eks.yaml: the same app-of-apps, plus the AWS Load Balancer Controller
+k8s/cluster/eks           the Gateway behind an NLB (k8s/gateway/gateway-eks.yaml), the gp3 StorageClass
+k8s/overlays/eks          the k3s overlay, with backups through Pod Identity to eks/ in the bucket
 ```
 
 ## Using it
@@ -23,10 +27,14 @@ forgotten cluster keeps running:
 
 ```bash
 terraform -chdir=terraform/aws/bootstrap apply
-make eks-up      # 15-20 minutes; writes ~/.kube/storefront-eks.yaml (context eks-storefront)
+make eks-up      # the cluster (15-20 minutes), then Argo CD installs the platform (10-30 more)
 make eks-down    # about 15 minutes
 make eks-plan    # what would change, without changing it
+bash scripts/netpol-check.sh eks   # the NetworkPolicies, enforced by the VPC CNI, and the Gateway through the NLB
 ```
+
+`make eks-up` prints the addresses: the storefront on `http://<NLB IP>/products`, and Grafana, Prometheus and
+Alertmanager on `<name>.<NLB IP>.sslip.io`. As on k3s, they answer only the IP you ran it from.
 
 kubectl calls `aws eks get-token` for every request, so the AWS CLI must be logged in as the identity that ran
 `make eks-up`: EKS made that identity the cluster admin. The API's public endpoint admits only the IP you ran it
@@ -44,10 +52,13 @@ as k3s, and `make keep HOURS=…` keeps both.
 | NAT gateway | $0.045/hr, plus $0.045 per GB through it |
 | The NAT gateway's public IPv4 | $0.005/hr |
 | 3 × 30 GB gp3 root volumes | about $0.010/hr |
-| **Total** | **about $0.28/hr, $6.80/day** |
+| Network Load Balancer | $0.0225/hr, plus about $0.006 per unit of use (a lab barely uses one) |
+| The NLB's 3 Elastic IPs | $0.015/hr |
+| Postgres's 2 × 1 GiB gp3 volumes | under $0.001/hr |
+| **Total** | **about $0.33/hr, $8/day** |
 
-That's about $0.09/hr more than k3s ($0.19/hr). The control plane costs about what the k3s server did, and the NAT
-gateway is most of the difference. Slice 2 adds a Network Load Balancer (about $0.04/hr with its public IPs).
+That's about $0.14/hr more than k3s ($0.19/hr). The control plane costs about what the k3s server did. Most of the
+difference is the NAT gateway and the load balancer, the two things that replace the server's public IP.
 
 ## Choices
 
@@ -60,22 +71,68 @@ gateway is most of the difference. Slice 2 adds a Network Load Balancer (about $
 | **`upgrade_policy: STANDARD`** | At the end of standard support EKS upgrades the cluster instead of charging for extended support. | An upgrade you didn't choose, if one is ever left that long. |
 | **Managed node group**, 3 × t3.medium, one per zone | AWS replaces and upgrades the nodes. | No autoscaling beyond 3 nodes. Karpenter is a later step. |
 | **Prefix delegation, 40 pods per node** | Without it the VPC CNI fits 17 pods on a t3.medium; this stack needs about 22 per node. 40 leaves room without letting one node take more pods than its memory holds. | Nothing measurable: each node reserves 542 MiB either way, sized for 17 pods, and has 3,293 MiB allocatable. |
-| **IMDSv2 with hop limit 1** | Pods can't reach the node's IAM role, as on k3s. | Controllers that read instance metadata need their region and VPC passed in (the load balancer controller, slice 2). |
-| **EKS Pod Identity** for workloads | Short-lived credentials per service account; the EBS CSI driver uses it now, and the backup sidecar will instead of a static key. | Nothing. |
+| **IMDSv2 with hop limit 1** | Pods can't reach the node's IAM role, as on k3s. | Controllers that read instance metadata need their region and VPC passed in: the load balancer controller gets them in its values. |
+| **EKS Pod Identity** for workloads | Short-lived credentials per service account: the EBS CSI driver, the load balancer controller, and the Postgres pods' backup sidecar, instead of k3s's static key. | A NetworkPolicy that lets the Postgres pods reach the agent on each node (169.254.170.23:80). |
 | **NetworkPolicy by the VPC CNI** | k3s enforced it with kube-router, kind with Calico. | To check with `scripts/netpol-check.sh` once the platform runs. |
 | **Access entries** (EKS API), not the aws-auth ConfigMap | Who can use the cluster lives in EKS and Terraform. | Only the identity that ran `make eks-up` is admin. |
 | **No control-plane logs** | CloudWatch ingestion costs $0.50 per GB, and audit logs are large. | Turn on `api` and `audit` when debugging. |
 
+## The platform (slice 2)
+
+Argo CD installs the same app-of-apps as on kind and k3s (`k8s/platform`, `values-eks.yaml`), and EKS changes three
+things.
+
+**How traffic gets in.** A Network Load Balancer, made by the AWS Load Balancer Controller, sits in front of the same
+Envoy Gateway. The NLB only gets packets into the VPC and across zones; Envoy still does the routing: the
+HTTPRoutes, the hidden `/actuator`, and the canary's traffic split. Compared with k3s, where every request entered
+through the server's Elastic IP, losing a node or a zone now only removes its targets.
+
+| Setting | Why |
+|---------|-----|
+| Targets are the Envoy pods' IPs (`nlb-target-type: ip`) | The VPC CNI gives pods VPC addresses, so the NLB sends straight to them, not through a port on every node. |
+| Cross-zone load balancing on | Two Envoy pods across three zones leave one zone without one, and the monitoring hostnames use one of the NLB's addresses. Every address must reach every pod. |
+| Three Elastic IPs from Terraform | The controller makes the NLB halfway through Argo CD's sync, but the monitoring UIs need their `<name>.<ip>.sslip.io` hostnames up front. These cost the same as the NLB's own public IPs. |
+| `loadBalancerSourceRanges`: your IP only | As on k3s, where the security group admitted only `admin_cidrs`. The controller turns it into the NLB's security group rules. |
+| The controller's own Gateway API support off | Envoy Gateway owns the Gateway resources here. |
+| The controller's Service webhook off | Its `failurePolicy` is `Fail`, so while the controller was down no Service could be created anywhere in the cluster. The Gateway's Service names its load balancer class itself. |
+| Envoy pods spread across zones, preferably | Losing a zone leaves one Envoy. Preferred, not required, so a replacement still starts while a zone is down. |
+
+**Storage.** The default StorageClass is gp3 on EBS (`k8s/cluster/eks/storageclass.yaml`), with
+`WaitForFirstConsumer` so each volume is made in its pod's zone. An EBS volume outlives its node, unlike k3s's
+local-path directories, but can only attach to a node in its own zone.
+
+**Backups.** The EKS overlay is the k3s overlay plus patches (`kubectl kustomize` both and diff them):
+- the Barman Cloud sidecar gets credentials from Pod Identity, not the static key;
+- it writes to `eks/` in the bucket, the only prefix its role may write, so the EKS database can't touch the k3s
+  archive (`storefront-db/`);
+- a NetworkPolicy lets the Postgres pods reach the Pod Identity agent.
+
+Until slice 3 the EKS database is a test one that starts empty every run. A previous run's archive moves to
+`eks/storefront-db-previous/`, because a new database only archives into an empty folder. That has to change before
+the EKS database holds the real data.
+
+Not on EKS yet: the hourly Grafana dashboard snapshots (k3s only, and they'd need Pod Identity too), and the
+`--kubelet-insecure-tls` flag kind needs on metrics-server is still set.
+
 ## What `make eks-down` cleans up
 
-Kubernetes creates AWS resources that Terraform doesn't own: load balancers (AWS Load Balancer Controller), EBS
-volumes (EBS CSI driver) and network interfaces (VPC CNI). A load balancer or interface left in a subnet stops the
-VPC from being deleted, and a volume left behind keeps costing money. So
-[scripts/eks-down.sh](../scripts/eks-down.sh) first deletes the nodes, which stops those controllers. Then it deletes
-what they left, by the tags they put on it, destroys the rest, and finally deletes freed volumes tagged
-`storefront/cluster=storefront-eks`. It uses AWS APIs only, so the nightly destroy runs the same script.
+Kubernetes creates AWS resources that Terraform doesn't own:
+- load balancers, target groups and security groups, from the AWS Load Balancer Controller;
+- EBS volumes, from the EBS CSI driver;
+- network interfaces, from the VPC CNI.
 
-Postgres's volumes go too, as on k3s: what survives is its archive in S3.
+Any of the first or last left behind stops the VPC from being deleted, and a volume keeps costing money.
+[scripts/eks-down.sh](../scripts/eks-down.sh) works in an order that avoids both:
+1. Delete the nodes, which stops those controllers.
+2. Delete the load balancers and target groups by their cluster tag.
+3. Destroy the cluster. The controller adds rules to the cluster's security group that point at its own groups, and
+   AWS won't delete a group something still points at. Destroying the cluster deletes that group and its rules.
+4. Delete the controller's security groups and leftover network interfaces.
+5. Destroy the rest.
+6. Delete freed volumes tagged `storefront/cluster=storefront-eks`.
+
+It uses AWS APIs only, so the nightly destroy runs the same script. Postgres's volumes go too, as on k3s: what
+survives is its archive in S3.
 
 ## Checked on 2026-11-21
 

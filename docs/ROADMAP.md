@@ -658,9 +658,14 @@ Details are in [eks.md](eks.md).
       - 40 pods and 3,293 MiB allocatable per node, and two CoreDNS replicas in different zones;
       - an EBS volume through Pod Identity, egress through the NAT, and NetworkPolicy enforced;
       - the nightly destroy removed all 37 resources and the test volume in 8.5 minutes.
-- [ ] **Slice 2, the platform:** Argo CD and `k8s/platform` on EKS (`values-eks.yaml`), `overlays/eks` as a patch on
-      the same base, a gp3 StorageClass, the AWS Load Balancer Controller, backups through Pod Identity. The diff
-      between the k3s and EKS overlays is itself documentation of what changed.
+- [ ] **Slice 2, the platform:** Argo CD and `k8s/platform` on EKS (`values-eks.yaml`), with:
+      - the AWS Load Balancer Controller putting a Network Load Balancer on three Elastic IPs in front of the same
+        Envoy Gateway;
+      - a default gp3 StorageClass;
+      - `overlays/eks` as patches on the k3s overlay: backups through Pod Identity to `eks/` in the bucket. The diff
+        between the two overlays is itself documentation of what changed.
+
+      Written and planned (46 resources); not yet applied. [eks.md](eks.md#the-platform-slice-2) has the settings.
 - [ ] **Slice 3, the database:** the EKS database as a CloudNativePG replica of the k3s archive in S3, then a
       cutover rehearsal: freeze writes, switch WAL, promote.
 - [ ] **Slice 4:** External Secrets.

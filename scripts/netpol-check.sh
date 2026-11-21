@@ -3,12 +3,17 @@
 # Starts short-lived test pods (restricted-compliant) that try a TCP connection and report it.
 #   bash scripts/netpol-check.sh          (kind, Calico)
 #   bash scripts/netpol-check.sh k3s      (k3s on EC2, kube-router; the Gateway through the server's Elastic IP)
+#   bash scripts/netpol-check.sh eks      (EKS, the VPC CNI's policy agent; the Gateway through the NLB)
 set -u
 cd "$(dirname "$0")/.."
 if [ "${1:-kind}" = k3s ]; then
   export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/storefront-k3s.yaml}"
   command -v cygpath >/dev/null && KUBECONFIG=$(cygpath -w "$KUBECONFIG") # MSYS_NO_PATHCONV below: a Windows path
   CTX=k3s-storefront GW=http://$(terraform -chdir=terraform/aws/k3s output -raw server_public_ip)
+elif [ "$1" = eks ]; then
+  export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/storefront-eks.yaml}"
+  command -v cygpath >/dev/null && KUBECONFIG=$(cygpath -w "$KUBECONFIG")
+  CTX=eks-storefront GW=http://$(terraform -chdir=terraform/aws/eks output -raw nlb_public_ip)
 else
   CTX=kind-storefront GW=http://storefront.localhost
 fi

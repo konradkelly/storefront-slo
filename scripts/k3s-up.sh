@@ -54,21 +54,7 @@ k get nodes -L topology.kubernetes.io/zone
 
 step "Secrets (the only cluster state that isn't in git)"
 create_slack_secret
-# Grafana Cloud remote write keeps a curated set of metrics after make down (k8s/platform/files/kps-remote-write.yaml).
-gc_env=k8s/monitoring/secrets/grafana-cloud.env
-gc_url=
-if [ -s "$gc_env" ]; then
-  gc() { sed -n "s/^$1=//p" "$gc_env" | tr -d '\r' | tail -1; }
-  gc_url=$(gc GRAFANA_CLOUD_PROM_URL) gc_user=$(gc GRAFANA_CLOUD_PROM_USER) gc_token=$(gc GRAFANA_CLOUD_TOKEN)
-  [ -n "$gc_url" ] && [ -n "$gc_user" ] && [ -n "$gc_token" ] || { echo "$gc_env needs GRAFANA_CLOUD_PROM_URL, _USER and _TOKEN"; exit 1; }
-  gc_creds=$(mktemp)
-  (umask 077 && printf 'username=%s\npassword=%s\n' "$gc_user" "$gc_token" > "$gc_creds")
-  k -n monitoring create secret generic grafana-cloud --from-env-file="$gc_creds" --dry-run=client -o yaml | k apply -f -
-  rm -f "$gc_creds"
-  echo "Sending curated metrics to $gc_url"
-else
-  echo "No $gc_env: metrics stay in the cluster and are gone after make down (see k8s/monitoring/secrets/README.md)"
-fi
+create_grafana_cloud_secret # sets gc_url
 # S3 credentials for Postgres backups (k8s/overlays/k3s/backups.yaml) and the hourly Grafana snapshots
 # (k8s/monitoring/grafana-snapshots.yaml).
 k apply -f k8s/base/namespace.yaml # with its Pod Security labels; Argo CD adopts it

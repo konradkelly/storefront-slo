@@ -35,10 +35,11 @@ spec:
     repoURL: {{ .Values.repoURL }}
     targetRevision: {{ .Values.revision }}
     path: {{ .Values.clusterConfigPath }}
-    {{- if .Values.domain }}
-    # *.localhost only resolves on your own machine. Elsewhere, <name>.<server IP>.sslip.io resolves to the server.
+    {{- if or .Values.domain .Values.nlbEipAllocations .Values.adminCidrs }}
     kustomize:
       patches:
+        {{- if .Values.domain }}
+        # *.localhost only resolves on your own machine. Elsewhere, <name>.<public IP>.sslip.io resolves to that IP.
         {{- range list "grafana" "prometheus" "alertmanager" }}
         - target:
             kind: HTTPRoute
@@ -47,6 +48,27 @@ spec:
             - op: replace
               path: /spec/hostnames
               value: [{{ . }}.{{ $.Values.domain }}]
+        {{- end }}
+        {{- end }}
+        {{- if .Values.nlbEipAllocations }}
+        # EKS: the NLB takes the Elastic IPs Terraform made, so its addresses are known before it exists.
+        - target:
+            kind: EnvoyProxy
+            name: eks-nlb
+          patch: |-
+            - op: add
+              path: /spec/provider/kubernetes/envoyService/annotations/service.beta.kubernetes.io~1aws-load-balancer-eip-allocations
+              value: {{ .Values.nlbEipAllocations | quote }}
+        {{- end }}
+        {{- if .Values.adminCidrs }}
+        # EKS: only these addresses may connect, as on k3s, where the security group admits only admin_cidrs.
+        - target:
+            kind: EnvoyProxy
+            name: eks-nlb
+          patch: |-
+            - op: add
+              path: /spec/provider/kubernetes/envoyService/loadBalancerSourceRanges
+              value: {{ .Values.adminCidrs | toJson }}
         {{- end }}
     {{- end }}
   destination:

@@ -1,0 +1,30 @@
+# AWS Load Balancer Controller (chart 3.6.3), EKS only (k8s/platform/values-eks.yaml). It watches Services of type
+# LoadBalancer with loadBalancerClass service.k8s.aws/nlb and makes a Network Load Balancer for each: here only Envoy
+# Gateway's (k8s/gateway/gateway-eks.yaml). It calls AWS with its Pod Identity role (terraform/aws/eks/platform.tf).
+#
+# vpcId comes per run from the root Application (k8s/platform/templates/charts.yaml). The nodes allow instance
+# metadata only one hop away (hop limit 1), so the controller can't look the VPC or region up itself.
+clusterName: storefront-eks
+region: us-east-1
+
+# Envoy Gateway owns the Gateway API here. The controller's own Gateway API support (for ALBs and NLBs) would watch
+# the same Gateway resources for its own GatewayClasses; turn it off so there's no doubt who handles what.
+controllerConfig:
+  featureGates:
+    ALBGatewayAPI: false
+    NLBGatewayAPI: false
+
+# Off: the webhook that sets loadBalancerClass on every new LoadBalancer Service. Its failurePolicy is Fail, so while
+# the controller is down no Service could be created anywhere in the cluster, its own included. The Gateway's
+# Service names the class itself.
+enableServiceMutatorWebhook: false
+
+# No Ingress here, so no IngressClass.
+createIngressClassResource: false
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

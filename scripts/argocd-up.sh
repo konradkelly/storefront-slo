@@ -4,6 +4,7 @@
 # Called by kind-up.sh and k3s-up.sh once the cluster and its Secrets exist; safe to rerun.
 #   bash scripts/argocd-up.sh          # kind
 #   bash scripts/argocd-up.sh k3s      # k3s on EC2 (k3s-up.sh sets DOMAIN, GRAFANA_CLOUD_URL and STOREFRONT_PATH)
+#   bash scripts/argocd-up.sh eks      # EKS (eks-up.sh also sets VPC_ID, NLB_EIP_ALLOCATIONS and ADMIN_CIDR)
 # REVISION=<branch> makes every app track that branch instead of main. Push it first: Argo CD reads GitHub.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -14,7 +15,10 @@ case "$cluster" in
   k3s)
     context=k3s-storefront
     export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/storefront-k3s.yaml}" ;;
-  *) echo "usage: $0 [kind|k3s]" >&2; exit 2 ;;
+  eks)
+    context=eks-storefront
+    export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/storefront-eks.yaml}" ;;
+  *) echo "usage: $0 [kind|k3s|eks]" >&2; exit 2 ;;
 esac
 revision=${REVISION:-main}
 k() { kubectl --context "$context" "$@"; }
@@ -55,6 +59,9 @@ spec:
         domain: "${DOMAIN:-}"
         grafanaCloudUrl: "${GRAFANA_CLOUD_URL:-}"
         ${STOREFRONT_PATH:+storefrontPath: $STOREFRONT_PATH}
+        ${VPC_ID:+vpcId: $VPC_ID}
+        ${NLB_EIP_ALLOCATIONS:+nlbEipAllocations: "$NLB_EIP_ALLOCATIONS"}
+        ${ADMIN_CIDR:+adminCidrs: ["$ADMIN_CIDR"]}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

@@ -226,8 +226,8 @@ Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 
 costs about $0.19/hr while up, and a nightly workflow destroys it in case you forget. Setup, cost and what
 changes compared with kind: [docs/k3s.md](docs/k3s.md).
 
-Next is EKS, replacing what k3s made you run yourself, so far only the cluster (`make eks-up`, about $0.28/hr):
-[docs/eks.md](docs/eks.md).
+Next is EKS, replacing what k3s made you run yourself: `make eks-up` builds the cluster and the same platform behind
+a Network Load Balancer, for about $0.33/hr ([docs/eks.md](docs/eks.md)).
 
 ## Lab-only settings and known gaps
 
