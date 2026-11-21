@@ -10,7 +10,7 @@ rate lets you break things on purpose and watch the dashboards and alerts react.
 app/          Spring Boot API (products, cart, checkout, fake payments)
 k8s/          Kustomize base/ (app as a canary Rollout, Postgres, PodMonitor, SLO rules) + overlays/kind and k3s;
               platform/ (Argo CD app-of-apps) and cluster/ (Gateway, routes, probe); monitoring values, k6 Job
-terraform/    AWS: bootstrap (state, budget, CI role) and k3s on EC2 (Phase 4a)
+terraform/    AWS: bootstrap (state, budget, CI role), k3s on EC2 (Phase 4a), and EKS (Phase 4b, in progress)
 prometheus/   Compose scrape config, SLO recording rules, burn-rate alerts, promtool tests
 alertmanager/ routing, inhibition, Slack template, local webhook logger (secrets are gitignored)
 scripts/      kind-up.sh / k3s-up.sh / argocd-up.sh (bootstrap; Argo CD does the rest), gen-k8s-rules.sh, experiments
@@ -225,6 +225,9 @@ Reset with `PAYMENT_FAILURE_RATE=0.001 PAYMENT_LATENCY_MS=150 RESTOCK_LEVEL=200 
 `make up` builds the same system on three EC2 instances that you run yourself, and `make down` removes it. It
 costs about $0.19/hr while up, and a nightly workflow destroys it in case you forget. Setup, cost and what
 changes compared with kind: [docs/k3s.md](docs/k3s.md).
+
+Next is EKS, replacing what k3s made you run yourself, so far only the cluster (`make eks-up`, about $0.28/hr):
+[docs/eks.md](docs/eks.md).
 
 ## Lab-only settings and known gaps
 

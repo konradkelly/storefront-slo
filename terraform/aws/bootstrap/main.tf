@@ -166,19 +166,43 @@ data "aws_iam_policy_document" "github_trust" {
 
 resource "aws_iam_role" "github_k3s" {
   name                 = "storefront-k3s-github"
-  description          = "GitHub Actions (main branch) manages the k3s stack: nightly destroy"
+  description          = "GitHub Actions (main branch) manages the k3s and EKS stacks: nightly destroy"
   assume_role_policy   = data.aws_iam_policy_document.github_trust.json
   max_session_duration = 3600
 }
 
-# Enough to refresh and destroy the k3s stack (terraform/aws/k3s), and nothing outside it where IAM allows scoping:
-# IAM, S3 and SSM are limited to the stack's names. EC2 is limited to the region, because many EC2 delete calls
-# can't be scoped by tag. Tighten further if this account ever holds anything that matters.
+# Enough to refresh and destroy the k3s and EKS stacks (terraform/aws/k3s, terraform/aws/eks), and nothing outside
+# them where IAM allows scoping: IAM, S3, SSM and EKS are limited to the stacks' names, and load balancers to the ones
+# the EKS cluster's controller tagged. EC2 is limited to the region, because many EC2 delete calls can't be scoped by
+# tag. Tighten further if this account ever holds anything that matters.
 data "aws_iam_policy_document" "github_k3s" {
   statement {
     sid       = "StateBucket"
     actions   = ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = [aws_s3_bucket.state.arn, "${aws_s3_bucket.state.arn}/k3s/*"]
+    resources = [aws_s3_bucket.state.arn, "${aws_s3_bucket.state.arn}/k3s/*", "${aws_s3_bucket.state.arn}/eks/*"]
+  }
+  # The cluster and everything under it: node groups, add-ons, access entries, Pod Identity associations.
+  statement {
+    sid       = "EKSCluster"
+    actions   = ["eks:*"]
+    resources = ["arn:aws:eks:${var.region}:${local.account_id}:*/storefront-eks*"]
+  }
+  # scripts/eks-down.sh deletes the load balancers Kubernetes created, which Terraform doesn't own. Describe calls
+  # can't be scoped; deletes only reach what carries the cluster's tag.
+  statement {
+    sid       = "ELBDescribe"
+    actions   = ["elasticloadbalancing:Describe*"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "ELBDeleteTagged"
+    actions   = ["elasticloadbalancing:DeleteLoadBalancer", "elasticloadbalancing:DeleteTargetGroup"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/elbv2.k8s.aws/cluster"
+      values   = ["storefront-eks"]
+    }
   }
   statement {
     sid       = "EC2InRegion"
@@ -198,6 +222,8 @@ data "aws_iam_policy_document" "github_k3s" {
       "arn:aws:iam::${local.account_id}:instance-profile/storefront-k3s-*",
       "arn:aws:iam::${local.account_id}:user/storefront-k3s-*",
       "arn:aws:iam::${local.account_id}:policy/storefront-k3s-*",
+      "arn:aws:iam::${local.account_id}:role/storefront-eks-*",
+      "arn:aws:iam::${local.account_id}:policy/storefront-eks-*",
     ]
   }
   # Read only, so CI can't delete the database's backups. The nightly destroy doesn't touch this bucket, and the
