@@ -3,7 +3,7 @@
 
 SHELL := bash
 
-.PHONY: help up down plan wipe-db keep unkeep kind-up argocd-kind
+.PHONY: help up down plan wipe-db keep unkeep kind-up argocd-kind eks-up eks-down eks-plan
 
 help:
 	@echo "make up            k3s on EC2 (Phase 4a): terraform apply, then Argo CD installs the rest. Costs ~\$$0.19/hr."
@@ -14,6 +14,9 @@ help:
 	@echo "make unkeep        nightly destroy applies again"
 	@echo "make kind-up       local kind lab (Argo CD installs everything from GitHub main; REVISION=<branch> to change)"
 	@echo "make argocd-kind   rerun only the Argo CD step on the kind lab"
+	@echo "make eks-up        EKS (Phase 4b): VPC with a NAT gateway, control plane, 3 nodes. Costs ~\$$0.28/hr."
+	@echo "make eks-down      destroy the EKS environment, including volumes and load balancers Kubernetes made"
+	@echo "make eks-plan      terraform plan for the EKS environment, no changes"
 
 up:
 	bash scripts/k3s-up.sh
@@ -43,3 +46,14 @@ kind-up:
 
 argocd-kind:
 	bash scripts/argocd-up.sh kind
+
+eks-up:
+	bash scripts/eks-up.sh
+
+eks-down:
+	bash scripts/eks-down.sh
+
+eks-plan:
+	terraform -chdir=terraform/aws/eks init -input=false -reconfigure \
+	  -backend-config="bucket=storefront-pulse-tfstate-$$(aws sts get-caller-identity --query Account --output text)" >/dev/null
+	terraform -chdir=terraform/aws/eks plan -input=false

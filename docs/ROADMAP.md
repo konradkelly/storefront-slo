@@ -631,17 +631,37 @@ each self-managed piece with the managed equivalent.
 | Ran it yourself on k3s | Managed on EKS |
 |------------------------|----------------|
 | Single k3s server | EKS control plane (multi-AZ, $0.10/hr) |
-| EC2 agents in Terraform | Managed node group, or **Karpenter** |
-| Node role reachable through IMDS | **EKS Pod Identity** (or IRSA), one role per workload |
-| Sealed Secrets | **External Secrets Operator** + AWS Secrets Manager |
-| Traefik / ServiceLB | **AWS Load Balancer Controller** (ALB) |
+| EC2 agents in Terraform | **Managed node group**, one node per zone. Karpenter later, for the zone-failure experiment. |
+| Zone labels from user_data | Set by the cloud provider |
+| A static IAM access key for backups | **EKS Pod Identity**, one role per workload |
+| Secrets created by `make up` from local files | **External Secrets Operator** + AWS Secrets Manager |
+| ServiceLB in front of Envoy Gateway | **AWS Load Balancer Controller**: a Network Load Balancer in front of the same Envoy Gateway |
 | local-path storage | **EBS CSI driver** with gp3 volumes |
-| CloudNativePG on node disk | **RDS Postgres**, or CNPG on EBS. Write up the trade-off. |
-| GHCR | ECR, now that pod and node identity make it easy |
+| CloudNativePG on node disk | **CloudNativePG on EBS**. RDS later, as a write-up or experiment. |
+| One CoreDNS replica, on the server | EKS's CoreDNS add-on: two replicas on different nodes |
+| NetworkPolicy by kube-router | NetworkPolicy by the VPC CNI's node agent |
+| GHCR | ECR, now that pod and node identity make it easy (later; GHCR works on EKS) |
 
-- [ ] Add Terraform modules for EKS, node groups/Karpenter, ECR, and RDS, reusing the Phase 4a VPC and state.
-- [ ] Add `overlays/eks` as a patch on the same base. The diff between the k3s and EKS overlays is itself
-      documentation of what changed.
+Decided on 2026-11-21:
+- **Database:** CloudNativePG on EBS, because it keeps the backups, restore drill and alerts. RDS can't load a
+  CloudNativePG backup (physical files), so it would need logical replication or a dump for the cutover.
+- **Nodes:** a managed node group.
+- **Network:** private subnets behind one NAT gateway, in the cluster's own VPC.
+- **Kubernetes:** 1.35, because 1.34 leaves EKS standard support on 2026-12-01.
+- **Domain:** chosen at the cutover.
+
+Details are in [eks.md](eks.md).
+
+- [ ] **Slice 1, the cluster** (`terraform/aws/eks`, `make eks-up` / `make eks-down`, the nightly destroy): VPC,
+      EKS 1.35, 3 × t3.medium, VPC CNI with prefix delegation and NetworkPolicy, CoreDNS, kube-proxy, Pod Identity
+      agent, EBS CSI driver. Written and planned (37 resources); not yet applied.
+- [ ] **Slice 2, the platform:** Argo CD and `k8s/platform` on EKS (`values-eks.yaml`), `overlays/eks` as a patch on
+      the same base, a gp3 StorageClass, the AWS Load Balancer Controller, backups through Pod Identity. The diff
+      between the k3s and EKS overlays is itself documentation of what changed.
+- [ ] **Slice 3, the database:** the EKS database as a CloudNativePG replica of the k3s archive in S3, then a
+      cutover rehearsal: freeze writes, switch WAL, promote.
+- [ ] **Slice 4:** External Secrets.
+- [ ] **RDS** as a separate write-up or experiment, after the cutover.
 - [ ] **Cutover plan.** Run both clusters side by side. Argo CD syncs both. Restore the latest CNPG backup
       into the new database, switch writes during a short freeze, and move traffic through weighted DNS
       (Route 53, 10% → 50% → 100%) while watching both clusters' SLO dashboards.
@@ -730,7 +750,9 @@ Pick items based on interest.
 | SLO tooling | Hand-written vs. Sloth vs. Pyrra | Hand-write first, then adopt Pyrra for its UI |
 | GitOps | Argo CD vs. Flux | Argo CD (pairs with Argo Rollouts) |
 | Cloud cluster | EKS vs. k3s on EC2 | **Decided:** k3s first (4a), migrate to EKS later (4b) |
-| Cloud database on EKS | RDS vs. CloudNativePG on EBS | RDS, as a contrast with k3s |
+| Cloud database on EKS | RDS vs. CloudNativePG on EBS | **Decided:** CloudNativePG on EBS (the cutover replays the k3s archive). RDS later, as a contrast |
+| EKS nodes | Managed node group vs. Karpenter vs. Auto Mode | **Decided:** managed node group; Karpenter later |
+| EKS network | Public subnets vs. private subnets with NAT | **Decided:** private subnets, one NAT gateway |
 | Multi-cloud | Repeat 4a/4b on each cloud vs. go deep on AWS, then port | **Decided:** go deep on AWS (4a, 4b), then port to GKE and AKS (4c) |
 | GKE mode | Autopilot vs. Standard | Open: Autopilot is less to run, Standard is closer to EKS/AKS |
 | Argo CD topology | One hub managing all clusters vs. one per cluster | Open |
