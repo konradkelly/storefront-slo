@@ -654,7 +654,7 @@ Details are in [eks.md](eks.md).
 
 - [x] **Slice 1, the cluster** (`terraform/aws/eks`, `make eks-up` / `make eks-down`, the nightly destroy): VPC,
       EKS 1.35, 3 × t3.medium, VPC CNI with prefix delegation and NetworkPolicy, CoreDNS, kube-proxy, Pod Identity
-      agent, EBS CSI driver. Checked on 2026-11-21 ([eks.md](eks.md#checked-on-2026-11-21)):
+      agent, EBS CSI driver. Checked on 2026-11-21 ([eks.md](eks.md#slice-1-checked-on-2026-11-21)):
       - 40 pods and 3,293 MiB allocatable per node, and two CoreDNS replicas in different zones;
       - an EBS volume through Pod Identity, egress through the NAT, and NetworkPolicy enforced;
       - the nightly destroy removed all 37 resources and the test volume in 8.5 minutes.
@@ -665,7 +665,14 @@ Details are in [eks.md](eks.md).
       - `overlays/eks` as patches on the k3s overlay: backups through Pod Identity to `eks/` in the bucket. The diff
         between the two overlays is itself documentation of what changed.
 
-      Written and planned (46 resources); not yet applied. [eks.md](eks.md#the-platform-slice-2) has the settings.
+      Checked on 2026-11-21 ([eks.md](eks.md#slice-2-checked-on-2026-11-21)):
+      - every app Synced and Healthy in 8 minutes, and nothing Pending;
+      - the storefront through the NLB, open to the admin IP only;
+      - WAL and a base backup in `eks/` through Pod Identity;
+      - `netpol-check.sh eks` as expected.
+
+      Still to check: the nightly destroy with a load balancer to clean up.
+      [eks.md](eks.md#the-platform-slice-2) has the settings.
 - [ ] **Slice 3, the database:** the EKS database as a CloudNativePG replica of the k3s archive in S3, then a
       cutover rehearsal: freeze writes, switch WAL, promote.
 - [ ] **Slice 4:** External Secrets.

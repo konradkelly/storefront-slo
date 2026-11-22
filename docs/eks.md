@@ -6,7 +6,8 @@ run myself"). It's being built in slices, each working before the next
 
 1. **The cluster**: network, control plane, nodes, EKS add-ons, nightly destroy. *Done, checked on 2026-11-21 (below).*
 2. **The platform**: Argo CD and `k8s/platform` on EKS, Envoy Gateway behind a Network Load Balancer, Postgres on
-   EBS, backups through Pod Identity instead of a static key. *Written; not yet applied.*
+   EBS, backups through Pod Identity instead of a static key. *Running, checked on 2026-11-21 (below); destroying it
+   with a load balancer is still to check.*
 3. The database: the EKS database as a replica of the k3s archive in S3, and a cutover rehearsal.
 4. External Secrets, for the Secrets `make up` still creates from local files.
 5. The cutover: a domain, weighted DNS (10% → 50% → 100%), then the zone-failure experiment.
@@ -73,7 +74,7 @@ difference is the NAT gateway and the load balancer, the two things that replace
 | **Prefix delegation, 40 pods per node** | Without it the VPC CNI fits 17 pods on a t3.medium; this stack needs about 22 per node. 40 leaves room without letting one node take more pods than its memory holds. | Nothing measurable: each node reserves 542 MiB either way, sized for 17 pods, and has 3,293 MiB allocatable. |
 | **IMDSv2 with hop limit 1** | Pods can't reach the node's IAM role, as on k3s. | Controllers that read instance metadata need their region and VPC passed in: the load balancer controller gets them in its values. |
 | **EKS Pod Identity** for workloads | Short-lived credentials per service account: the EBS CSI driver, the load balancer controller, and the Postgres pods' backup sidecar, instead of k3s's static key. | A NetworkPolicy that lets the Postgres pods reach the agent on each node (169.254.170.23:80). |
-| **NetworkPolicy by the VPC CNI** | k3s enforced it with kube-router, kind with Calico. | To check with `scripts/netpol-check.sh` once the platform runs. |
+| **NetworkPolicy by the VPC CNI** | k3s enforced it with kube-router, kind with Calico. | Nothing: `scripts/netpol-check.sh eks` gives the same results as on k3s. |
 | **Access entries** (EKS API), not the aws-auth ConfigMap | Who can use the cluster lives in EKS and Terraform. | Only the identity that ran `make eks-up` is admin. |
 | **No control-plane logs** | CloudWatch ingestion costs $0.50 per GB, and audit logs are large. | Turn on `api` and `audit` when debugging. |
 
@@ -134,7 +135,7 @@ Any of the first or last left behind stops the VPC from being deleted, and a vol
 It uses AWS APIs only, so the nightly destroy runs the same script. Postgres's volumes go too, as on k3s: what
 survives is its archive in S3.
 
-## Checked on 2026-11-21
+## Slice 1 checked on 2026-11-21
 
 The first `make eks-up` created all 37 resources, and every node was Ready in its zone:
 
@@ -154,3 +155,28 @@ Then the nightly destroy workflow, started by hand, destroyed it in 8.5 minutes 
 destroyed all 37 resources and deleted the test claim's volume once the nodes had freed it. Afterwards AWS had no
 cluster, VPC, NAT gateway, Elastic IP, instance, tagged volume, network interface, launch template or `storefront-eks`
 IAM role left. The load balancer cleanup will first run for real in slice 2, when there's a load balancer.
+
+## Slice 2 checked on 2026-11-21
+
+`REVISION=feat/eks-platform make eks-up` created the 46 resources. Argo CD then had every app Synced and Healthy
+in 8 minutes: 54 pods across the 3 nodes, none Pending.
+
+- **Traffic:** the controller made an internet-facing NLB on the three Terraform Elastic IPs, one per zone, with
+  cross-zone load balancing on. Its targets were the two Envoy pods' IPs, on nodes in different zones, both
+  healthy. `/products` answered 200 in about 0.2 s through it, and Grafana, Prometheus and Alertmanager answered on
+  their sslip.io names. The NLB's security group admitted port 80 from the admin /32 and nothing else.
+- **Postgres:** the primary and the replica each on an encrypted 1 GiB gp3 volume, in different zones, tagged
+  `storefront/cluster=storefront-eks` for `make eks-down`.
+- **Backups through Pod Identity:** EKS gave the Barman Cloud sidecar its credentials too, although Kubernetes counts
+  it as an init container (a native sidecar). Continuous archiving succeeded. The first base backup was taken from
+  the primary, and its WAL (segments 4 and 5) and the segment after it were in `eks/storefront-db/`.
+- **NetworkPolicy:** `scripts/netpol-check.sh eks` gave every expected result. The VPC CNI's agent enforces the
+  policies kube-router enforced on k3s: the database closed to everything but the app, no internet from the app,
+  Prometheus scrapes allowed, `/actuator` hidden at the Gateway.
+- **Memory:** pod requests were 60–71% of each node's allocatable memory, and actual use 64–73%.
+- **The canary's wiring:** the Argo Rollouts Gateway API plugin controlled the HTTPRoute (stable 100, canary 0), and
+  Prometheus had the recording rules the analysis queries. No canary ran, because no new image was deployed; the
+  first deploy while EKS is up will run one.
+
+The app pods restarted 3 times each at the start: they started in the same second as the database, and Flyway's
+connection was refused until Postgres was up.
