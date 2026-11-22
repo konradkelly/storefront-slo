@@ -658,7 +658,7 @@ Details are in [eks.md](eks.md).
       - 40 pods and 3,293 MiB allocatable per node, and two CoreDNS replicas in different zones;
       - an EBS volume through Pod Identity, egress through the NAT, and NetworkPolicy enforced;
       - the nightly destroy removed all 37 resources and the test volume in 8.5 minutes.
-- [ ] **Slice 2, the platform:** Argo CD and `k8s/platform` on EKS (`values-eks.yaml`), with:
+- [x] **Slice 2, the platform:** Argo CD and `k8s/platform` on EKS (`values-eks.yaml`), with:
       - the AWS Load Balancer Controller putting a Network Load Balancer on three Elastic IPs in front of the same
         Envoy Gateway;
       - a default gp3 StorageClass;
@@ -671,7 +671,8 @@ Details are in [eks.md](eks.md).
       - WAL and a base backup in `eks/` through Pod Identity;
       - `netpol-check.sh eks` as expected.
 
-      Still to check: the nightly destroy with a load balancer to clean up.
+      - the nightly destroy removed all 46 resources in 14 minutes, along with the load balancer, the controller's
+        security groups and the Postgres volumes.
       [eks.md](eks.md#the-platform-slice-2) has the settings.
 - [ ] **Slice 3, the database:** the EKS database as a CloudNativePG replica of the k3s archive in S3, then a
       cutover rehearsal: freeze writes, switch WAL, promote.

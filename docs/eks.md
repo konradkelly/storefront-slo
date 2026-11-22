@@ -6,8 +6,7 @@ run myself"). It's being built in slices, each working before the next
 
 1. **The cluster**: network, control plane, nodes, EKS add-ons, nightly destroy. *Done, checked on 2026-11-21 (below).*
 2. **The platform**: Argo CD and `k8s/platform` on EKS, Envoy Gateway behind a Network Load Balancer, Postgres on
-   EBS, backups through Pod Identity instead of a static key. *Running, checked on 2026-11-21 (below); destroying it
-   with a load balancer is still to check.*
+   EBS, backups through Pod Identity instead of a static key. *Done, checked on 2026-11-21 (below).*
 3. The database: the EKS database as a replica of the k3s archive in S3, and a cutover rehearsal.
 4. External Secrets, for the Secrets `make up` still creates from local files.
 5. The cutover: a domain, weighted DNS (10% → 50% → 100%), then the zone-failure experiment.
@@ -180,3 +179,16 @@ in 8 minutes: 54 pods across the 3 nodes, none Pending.
 
 The app pods restarted 3 times each at the start: they started in the same second as the database, and Flyway's
 connection was refused until Postgres was up.
+
+Then the nightly destroy workflow, started by hand from `main`, destroyed it in 14 minutes with the CI role's
+permissions, in the order above:
+1. the nodes (8.5 minutes);
+2. the NLB and its target group;
+3. the cluster;
+4. the controller's two security groups. Each deleted on its first try, because destroying the cluster had already
+   removed the rules pointing at them;
+5. the other 37 resources;
+6. both Postgres volumes.
+
+That's all 46 resources. Afterwards AWS had no load balancer, target group, security group, network interface or
+volume from the cluster left, and nothing else from slice 1's list. The `eks/` archive in S3 stayed.
