@@ -674,8 +674,14 @@ Details are in [eks.md](eks.md).
       - the nightly destroy removed all 46 resources in 14 minutes, along with the load balancer, the controller's
         security groups and the Postgres volumes.
       [eks.md](eks.md#the-platform-slice-2) has the settings.
-- [ ] **Slice 3, the database:** the EKS database as a CloudNativePG replica of the k3s archive in S3, then a
-      cutover rehearsal: freeze writes, switch WAL, promote.
+- [ ] **Slice 3, the database:** the EKS database as a CloudNativePG replica of the k3s database, through their S3
+      archives (a distributed topology). Then a switchover rehearsal there and back, with `scripts/db-switchover.sh`:
+      - demote k3s;
+      - promote EKS with the demotion token;
+      - compare every row;
+      - check that k3s follows EKS.
+
+      Written; not yet applied. [eks.md](eks.md#the-database-slice-3) has the design.
 - [ ] **Slice 4:** External Secrets.
 - [ ] **RDS** as a separate write-up or experiment, after the cutover.
 - [ ] **Cutover plan.** Run both clusters side by side. Argo CD syncs both. Restore the latest CNPG backup

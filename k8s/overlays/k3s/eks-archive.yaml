@@ -1,0 +1,21 @@
+# The EKS database's archive (eks/ in the same bucket, k8s/overlays/eks), which this database replays from only after
+# scripts/db-switchover.sh has made EKS the primary. Read with the same static key as backups.yaml: its policy covers
+# the whole bucket (terraform/aws/k3s/backups.tf). No retention policy: the EKS database prunes its own archive.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: eks-archive
+  namespace: storefront
+spec:
+  configuration:
+    destinationPath: s3://storefront-k3s-backups-675901257165/eks
+    s3Credentials:
+      accessKeyId:
+        name: storefront-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: storefront-backup-s3
+        key: ACCESS_SECRET_KEY
+      region:
+        name: storefront-backup-s3
+        key: AWS_REGION

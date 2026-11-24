@@ -16,9 +16,17 @@ resources:
   - ../../base
   - backups.yaml
   - backup-alerts.yaml
+  - eks-archive.yaml
 
 patches:
   # Ship WAL through the Barman Cloud plugin (installed by Argo CD, k8s/platform/values-k3s.yaml) to the ObjectStore in backups.yaml.
+  #
+  # And take part in a CloudNativePG distributed topology with the EKS database (Phase 4b, docs/eks.md): one
+  # database in two clusters, each replaying the other's archive while it isn't the primary. "k3s" and "eks" name
+  # the two; both Clusters are called storefront-db, so `self` says which one this is. k3s is the primary unless
+  # scripts/db-switchover.sh has moved it: that script overrides `primary` (and passes the promotion token) on the
+  # storefront Argo CD Application, not in git, because the switchover's two steps have to reach the two clusters
+  # in order.
   - target:
       kind: Cluster
       name: storefront-db
@@ -33,6 +41,24 @@ patches:
             isWALArchiver: true
             parameters:
               barmanObjectName: storefront-backups
+        replica:
+          self: k3s
+          primary: k3s
+          source: eks
+        # Both archives keep each database under the folder named after its Cluster, storefront-db.
+        externalClusters:
+          - name: k3s
+            plugin:
+              name: barman-cloud.cloudnative-pg.io
+              parameters:
+                barmanObjectName: storefront-backups
+                serverName: storefront-db
+          - name: eks
+            plugin:
+              name: barman-cloud.cloudnative-pg.io
+              parameters:
+                barmanObjectName: eks-archive
+                serverName: storefront-db
   # PAYMENT_FAILURE_RATE, the knob scripts/experiments/k3s-fault.sh turns.
   - path: payment-fault.yaml
 
