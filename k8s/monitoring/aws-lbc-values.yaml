@@ -19,6 +19,13 @@ controllerConfig:
 # Service names the class itself.
 enableServiceMutatorWebhook: false
 
+# The webhooks' TLS certificate from cert-manager (installed a wave earlier, k8s/platform/values-eks.yaml). Without it
+# the chart generates a new CA and certificate every time it's rendered, and Argo CD renders it again and again: the
+# webhooks then trusted one CA while the controller served a certificate from another, and every TargetGroupBinding
+# failed "x509: certificate signed by unknown authority", so the NLB never got made (2026-11-25). With cert-manager
+# the chart renders the same every time, and cert-manager's cainjector fills in the CA.
+enableCertManager: true
+
 # No Ingress here, so no IngressClass.
 createIngressClassResource: false
 
