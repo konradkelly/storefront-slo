@@ -10,7 +10,8 @@
 # (scripts/eks-down.sh) stops that, and .github/workflows/k3s-nightly-destroy.yml runs it every night in case you
 # forget.
 #
-# Needs: terraform >= 1.10, aws CLI (logged in; it also signs every kubectl call), kubectl.
+# Needs: terraform >= 1.10, aws CLI (logged in; it also signs every kubectl call), kubectl, and k3s up (make up):
+# the database here is restored from k3s's archive and needs k3s's app password.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -45,21 +46,49 @@ step "Secrets (the only cluster state that isn't in git, until External Secrets 
 create_slack_secret
 create_grafana_cloud_secret # sets gc_url
 
-step "Database: new, with its archive in eks/ of the backup bucket"
-# Until slice 3 the EKS database is a test one that starts empty: slice 3 makes it a replica of the k3s archive. A new
-# database only archives into an empty folder ("Expected empty archive"), so a previous EKS run's archive moves to
-# eks/storefront-db-previous/ first, replacing the one before. Nothing here touches the k3s archive (storefront-db/).
-# Change this before the EKS database holds the real data (the cutover): it should restore, as k3s-up.sh does.
-archive="s3://storefront-k3s-backups-$account/eks"
+step "Database: a replica of the k3s database (slice 3)"
+# The EKS database is restored from the k3s archive (storefront-db/ in the bucket) and keeps replaying it, until
+# scripts/db-switchover.sh makes it the primary (k8s/overlays/eks, docs/eks.md). So k3s goes first: make up.
+bucket="storefront-k3s-backups-$account"
+archive="s3://$bucket/eks"
+k3s_kubeconfig="$HOME/.kube/storefront-k3s.yaml"
+command -v cygpath >/dev/null && k3s_kubeconfig=$(cygpath -w "$k3s_kubeconfig")
+k3s() { MSYS_NO_PATHCONV=1 kubectl --kubeconfig "$k3s_kubeconfig" --context k3s-storefront "$@"; }
 if k -n storefront get cluster storefront-db >/dev/null 2>&1; then
   echo "The database exists: keeping it and its archive"
-elif [ -n "$(aws s3 ls "$archive/storefront-db/" 2>/dev/null)" ]; then
-  echo "Moving the previous EKS database's archive to $archive/storefront-db-previous/"
-  aws s3 rm "$archive/storefront-db-previous/" --recursive --only-show-errors
-  aws s3 cp "$archive/storefront-db/" "$archive/storefront-db-previous/" --recursive --only-show-errors
-  aws s3 rm "$archive/storefront-db/" --recursive --only-show-errors
 else
-  echo "No previous EKS archive: a new, empty database"
+  # The restore starts from k3s's newest base backup. k3s takes one as soon as its database exists (immediate: true).
+  done_backups=0
+  for f in $(aws s3 ls "s3://$bucket/storefront-db/storefront-db/base/" --recursive | awk '/backup\.info$/ {print $4}'); do
+    aws s3 cp "s3://$bucket/$f" - | grep -q '^status=DONE' && done_backups=$((done_backups + 1))
+  done
+  if [ "$done_backups" = 0 ]; then
+    echo "No completed base backup in s3://$bucket/storefront-db/storefront-db/ to restore from." >&2
+    echo "Bring k3s up first (make up) and wait for its first backup." >&2
+    exit 1
+  fi
+  echo "k3s's archive has $done_backups completed base backup(s)"
+  # The replicated roles have k3s's passwords, so the app here needs k3s's Secret. Only the credentials: CloudNativePG
+  # adds the rest it needs.
+  if ! k3s -n storefront get secret storefront-db-app >/dev/null 2>&1; then
+    echo "Can't read storefront-db-app from k3s ($k3s_kubeconfig). Bring k3s up first (make up)." >&2
+    exit 1
+  fi
+  k create namespace storefront --dry-run=client -o yaml | k apply -f - >/dev/null
+  # The values pass through as base64, never decoded or printed.
+  k3s -n storefront get secret storefront-db-app -o go-template='{{.data.username}} {{.data.password}}' |
+    { read -r u p || true # the template prints no newline, so read returns 1 though it read both
+      printf '{"apiVersion":"v1","kind":"Secret","type":"kubernetes.io/basic-auth",%s,"data":{"username":"%s","password":"%s"}}' \
+        '"metadata":{"name":"storefront-db-app","namespace":"storefront"}' "$u" "$p" | k apply -f - >/dev/null; }
+  echo "Copied the app's database credentials from k3s"
+  # A database archives only into an empty folder ("Expected empty archive"), so a previous EKS run's archive moves to
+  # eks/storefront-db-previous/ first, replacing the one before. The k3s archive is never touched here.
+  if [ -n "$(aws s3 ls "$archive/storefront-db/" 2>/dev/null)" ]; then
+    echo "Moving the previous EKS database's archive to $archive/storefront-db-previous/"
+    aws s3 rm "$archive/storefront-db-previous/" --recursive --only-show-errors
+    aws s3 cp "$archive/storefront-db/" "$archive/storefront-db-previous/" --recursive --only-show-errors
+    aws s3 rm "$archive/storefront-db/" --recursive --only-show-errors
+  fi
 fi
 
 step "Argo CD, then the platform and the storefront from git"

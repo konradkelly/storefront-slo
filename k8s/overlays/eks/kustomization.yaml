@@ -5,7 +5,9 @@
 #   - backups use the Pod Identity role terraform/aws/eks/platform.tf gives the Postgres pods' service account, not a
 #     static access key in a Secret, so there's no storefront-backup-s3 Secret here;
 #   - they go to eks/ in the same bucket, where that role may write, so the EKS database never touches the k3s
-#     archive (storefront-db/). In slice 3 the EKS database starts as a replica of that archive (docs/eks.md);
+#     archive (storefront-db/);
+#   - the database is the k3s database's replica (slice 3, docs/eks.md): restored from the k3s archive, then
+#     replaying it, until scripts/db-switchover.sh makes EKS the primary;
 #   - the Postgres pods may reach the Pod Identity agent (pod-identity-netpol.yaml).
 # Volumes come from the cluster's default StorageClass, gp3 on EBS (k8s/cluster/eks/storageclass.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -13,6 +15,7 @@ kind: Kustomization
 
 resources:
   - ../k3s
+  - k3s-archive.yaml
   - pod-identity-netpol.yaml
 
 patches:
@@ -29,3 +32,50 @@ patches:
         path: /spec/configuration/s3Credentials
         value:
           inheritFromIAMRole: true
+  # The k3s overlay's reader for this archive: here it's storefront-backups itself.
+  - patch: |-
+      $patch: delete
+      apiVersion: barmancloud.cnpg.io/v1
+      kind: ObjectStore
+      metadata:
+        name: eks-archive
+        namespace: storefront
+  - target:
+      kind: Cluster
+      name: storefront-db
+    patch: |-
+      # Restored from the k3s archive's newest base backup, then a replica of it: the same database, with the same
+      # system identifier, which a switchover needs.
+      - op: replace
+        path: /spec/bootstrap
+        value:
+          recovery:
+            source: k3s
+            database: storefront
+            owner: storefront
+            # The roles are k3s's, replicated, so the app must log in with k3s's password. scripts/eks-up.sh copies
+            # k3s's Secret here before the database exists. At promotion CloudNativePG sets the app user's password
+            # from this Secret, which is why it must be the same one (External Secrets replaces the copy, slice 4).
+            secret:
+              name: storefront-db-app
+      - op: replace
+        path: /spec/replica
+        value:
+          self: eks
+          primary: k3s
+          source: k3s
+      - op: replace
+        path: /spec/externalClusters
+        value:
+          - name: k3s
+            plugin:
+              name: barman-cloud.cloudnative-pg.io
+              parameters:
+                barmanObjectName: k3s-archive
+                serverName: storefront-db
+          - name: eks
+            plugin:
+              name: barman-cloud.cloudnative-pg.io
+              parameters:
+                barmanObjectName: storefront-backups
+                serverName: storefront-db

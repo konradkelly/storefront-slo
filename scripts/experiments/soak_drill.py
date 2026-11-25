@@ -6,8 +6,9 @@ holds it in place. Remediation removes the override a fixed time after the alert
 the git value (k8s/overlays/k3s/payment-fault.yaml). Logs one timeline line a minute (snap.py) plus EVENT lines, and
 keeps its phase in the soak-drill-state ConfigMap, so a restarted pod resumes. Real Slack notifications go out.
 
-Stop a burn by hand:
-  kubectl -n argocd patch application storefront --type merge -p '{"spec":{"source":{"kustomize":null}}}'
+Stop a burn by hand: remove only the patch on the Deployment from that list, e.g. with `kubectl -n argocd edit
+application storefront`. Not `"kustomize": null`: the list can also hold scripts/db-switchover.sh's patch on the
+database, and dropping that would make a demoted database promote itself.
 """
 import json
 import os
@@ -78,11 +79,20 @@ def event(text):
 
 
 def fault(rate, why):
-    """Sets the override, or removes it when rate is None. True if the Application took the change."""
-    source = {"kustomize": None} if rate is None else {"kustomize": {"patches": [
-        {"target": {"kind": "Deployment", "name": "storefront-api"}, "patch": PATCH.format(rate=rate)}]}}
+    """Sets the override, or removes it when rate is None. True if the Application took the change.
+
+    Only this drill's patch (the one on the Deployment) is set or removed. Others stay: scripts/db-switchover.sh keeps
+    which cluster's database is the primary in the same list, and dropping that would make a demoted database
+    promote itself."""
     try:
-        kube("PATCH", APP, {"spec": {"source": source}})
+        app = kube("GET", APP)
+        patches = [p for p in (app["spec"]["source"].get("kustomize") or {}).get("patches") or []
+                   if p.get("target", {}).get("kind") != "Deployment"]
+        if rate is not None:
+            patches.append({"target": {"kind": "Deployment", "name": "storefront-api"}, "patch": PATCH.format(rate=rate)})
+        # resourceVersion: if the list changed since the GET, the API rejects this and the next minute retries.
+        kube("PATCH", APP, {"metadata": {"resourceVersion": app["metadata"]["resourceVersion"]},
+                            "spec": {"source": {"kustomize": {"patches": patches} if patches else None}}})
     except Exception as e:
         event(f"patching the Argo CD Application failed ({why}), retrying next minute: {e}")
         return False

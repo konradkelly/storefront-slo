@@ -7,7 +7,8 @@ run myself"). It's being built in slices, each working before the next
 1. **The cluster**: network, control plane, nodes, EKS add-ons, nightly destroy. *Done, checked on 2026-11-21 (below).*
 2. **The platform**: Argo CD and `k8s/platform` on EKS, Envoy Gateway behind a Network Load Balancer, Postgres on
    EBS, backups through Pod Identity instead of a static key. *Done, checked on 2026-11-21 (below).*
-3. The database: the EKS database as a replica of the k3s archive in S3, and a cutover rehearsal.
+3. **The database**: the EKS database as a replica of the k3s database through their S3 archives, and a switchover
+   rehearsal both ways. *Done, checked on 2026-11-25 (below).*
 4. External Secrets, for the Secrets `make up` still creates from local files.
 5. The cutover: a domain, weighted DNS (10% → 50% → 100%), then the zone-failure experiment.
 
@@ -17,7 +18,8 @@ terraform/aws/eks         make eks-up / make eks-down: VPC, EKS control plane, n
                           Elastic IPs, Pod Identity roles
 k8s/platform              values-eks.yaml: the same app-of-apps, plus the AWS Load Balancer Controller
 k8s/cluster/eks           the Gateway behind an NLB (k8s/gateway/gateway-eks.yaml), the gp3 StorageClass
-k8s/overlays/eks          the k3s overlay, with backups through Pod Identity to eks/ in the bucket
+k8s/overlays/eks          the k3s overlay, with backups through Pod Identity to eks/ in the bucket, and the
+                          database as the k3s database's replica
 ```
 
 ## Using it
@@ -27,7 +29,9 @@ forgotten cluster keeps running:
 
 ```bash
 terraform -chdir=terraform/aws/bootstrap apply
+make up          # k3s first: the EKS database is restored from k3s's archive, and the app needs k3s's password
 make eks-up      # the cluster (15-20 minutes), then Argo CD installs the platform (10-30 more)
+bash scripts/db-switchover.sh eks   # make the EKS database the primary; `... k3s` switches back
 make eks-down    # about 15 minutes
 make eks-plan    # what would change, without changing it
 bash scripts/netpol-check.sh eks   # the NetworkPolicies, enforced by the VPC CNI, and the Gateway through the NLB
@@ -95,6 +99,7 @@ through the server's Elastic IP, losing a node or a zone now only removes its ta
 | `loadBalancerSourceRanges`: your IP only | As on k3s, where the security group admitted only `admin_cidrs`. The controller turns it into the NLB's security group rules. |
 | The controller's own Gateway API support off | Envoy Gateway owns the Gateway resources here. |
 | The controller's Service webhook off | Its `failurePolicy` is `Fail`, so while the controller was down no Service could be created anywhere in the cluster. The Gateway's Service names its load balancer class itself. |
+| The webhooks' certificate from cert-manager | Otherwise the chart makes a new CA on every render, and Argo CD renders it again and again. On 2026-11-25 the webhooks trusted one CA while the controller served another's certificate, every TargetGroupBinding failed x509 verification, and the NLB was never made. |
 | Envoy pods spread across zones, preferably | Losing a zone leaves one Envoy. Preferred, not required, so a replacement still starts while a zone is down. |
 
 **Storage.** The default StorageClass is gp3 on EBS (`k8s/cluster/eks/storageclass.yaml`), with
@@ -107,12 +112,57 @@ local-path directories, but can only attach to a node in its own zone.
   archive (`storefront-db/`);
 - a NetworkPolicy lets the Postgres pods reach the Pod Identity agent.
 
-Until slice 3 the EKS database is a test one that starts empty every run. A previous run's archive moves to
-`eks/storefront-db-previous/`, because a new database only archives into an empty folder. That has to change before
-the EKS database holds the real data.
+The EKS database is the k3s database's replica (slice 3, below). A previous EKS run's archive moves to
+`eks/storefront-db-previous/`, because a new database only archives into an empty folder.
 
 Not on EKS yet: the hourly Grafana dashboard snapshots (k3s only, and they'd need Pod Identity too), and the
 `--kubelet-insecure-tls` flag kind needs on metrics-server is still set.
+
+## The database (slice 3)
+
+One database in two clusters: CloudNativePG's distributed topology. Each cluster's Postgres archives to its own
+folder in the bucket (k3s to `storefront-db/`, EKS to `eks/`) and, while it isn't the primary, replays the other's.
+The clusters never connect to each other: all replication goes through S3.
+
+```
+            k3s (primary)                                  EKS (replica)
+  app -> Postgres --WAL--> s3://…/storefront-db/ --replay--> Postgres <- app (reads work, writes fail)
+         Postgres <-replay-- s3://…/eks/        <--WAL--    Postgres
+```
+
+- **Bootstrap.** `make eks-up` needs k3s up first. It checks that k3s's archive has a completed base backup, copies
+  k3s's `storefront-db-app` Secret, and creates the EKS database by restoring that backup
+  (`k8s/overlays/eks`). Restoring keeps the system identifier, which the switchover checks. The EKS backup role
+  may read `storefront-db/` but write only `eks/`.
+- **The password.** The roles are replicated, so the EKS app has to log in with k3s's password, and CloudNativePG
+  sets the app user's password from the Secret at promotion. So the Secret is a copy; External Secrets replaces the
+  copy in slice 4.
+- **Lag.** WAL reaches S3 when a segment closes: when it fills, or after `archive_timeout`, which is 5 minutes. So
+  the replica can be up to about 5 minutes behind while the primary is idle. The switchover doesn't lose those
+  minutes; it waits for them.
+- **While EKS is the replica**, its app serves reads. Writes fail, and the two scheduled jobs (restock,
+  reservation sweep) log read-only errors.
+
+**The switchover** ([scripts/db-switchover.sh](../scripts/db-switchover.sh)) moves the primary role:
+1. It switches WAL on the primary and waits until the replica has replayed past that point, so the write stop is
+   short.
+2. It demotes the primary. Postgres stops writes, archives its last WAL and writes a *demotion token*: its last
+   position, timeline and system identifier.
+3. It promotes the replica with that token. CloudNativePG replays up to the token's position before promoting, so
+   nothing written before the demotion is lost. Without the token it would be a failover, and the old primary would
+   have to be rebuilt.
+4. It compares every row on both sides, takes a base backup on the new timeline, and checks that the old primary
+   replays the new one's archive. That last check is what makes switching back possible.
+
+`primary` and the token are per-cluster overrides on the storefront Argo CD Application, not git, because steps 2
+and 3 must reach the two clusters in order. The root app leaves that field alone, so the override survives Argo CD
+and reruns of `make up`/`make eks-up`. The soak drill now removes only its own patch from the same list.
+
+**Before a nightly destroy, switch back to k3s.** `make up` restores k3s from its own archive, which holds nothing
+written while EKS was the primary.
+
+The app's traffic doesn't move here: each cluster's app uses its own database, so after a switchover the old side's
+writes fail. Moving traffic is the cutover's DNS step (slice 5).
 
 ## What `make eks-down` cleans up
 
@@ -192,3 +242,29 @@ permissions, in the order above:
 
 That's all 46 resources. Afterwards AWS had no load balancer, target group, security group, network interface or
 volume from the cluster left, and nothing else from slice 1's list. The `eks/` archive in S3 stayed.
+
+## Slice 3 checked on 2026-11-25
+
+Both clusters ran from `feat/eks-database`: k3s's database restored from its archive, then EKS's restored from
+k3s's. Two fixes first: `eks-up.sh` exited silently while copying the app Secret, and the load balancer controller's
+webhook certificate needed cert-manager (above).
+
+Before the switchover the two databases had the same system identifier, and EKS had replayed to k3s's exact WAL
+position (`0/70000000`), with 3,885 orders on each.
+
+| | k3s → EKS | EKS → k3s |
+|---|---|---|
+| Replica caught up before the demotion | 3 s | 8 s |
+| Writes stopped (demotion to promotion) | 34 s | 29 s |
+| Data on both sides | identical: every row, hashed | identical |
+| Base backup on the new timeline | 14 s | 18 s |
+| Old primary replaying the new one's archive | 7 s | 3 s |
+
+- **The app:** its open connections wrote again after promotion, with no restart. The old side's app logged
+  read-only errors only while its database was demoted: the k3s app from 21:12:33 to 21:14:33 UTC, inside the
+  21:11:54–21:14:55 window.
+- **The restart:** CloudNativePG restarted the new primary's Postgres about 50 s after promoting it, which broke the
+  script's first run at its last check. The script now waits for the new primary to accept connections.
+- **Afterwards:** both Clusters were back to what git says (k3s primary), with no override left on either storefront
+  Application.
+

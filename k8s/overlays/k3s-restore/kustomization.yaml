@@ -27,12 +27,13 @@ patches:
             # password to match it.
             database: storefront
             owner: storefront
+      # Appended to the k3s overlay's two (the k3s and EKS archives).
       - op: add
-        path: /spec/externalClusters
+        path: /spec/externalClusters/-
         value:
-          - name: previous
-            plugin:
-              name: barman-cloud.cloudnative-pg.io
-              parameters:
-                barmanObjectName: storefront-backups # k8s/overlays/k3s/backups.yaml, the same bucket
-                serverName: storefront-db-previous
+          name: previous
+          plugin:
+            name: barman-cloud.cloudnative-pg.io
+            parameters:
+              barmanObjectName: storefront-backups # k8s/overlays/k3s/backups.yaml, the same bucket
+              serverName: storefront-db-previous

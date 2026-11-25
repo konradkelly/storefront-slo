@@ -1,0 +1,13 @@
+# The k3s database's archive (storefront-db/ in the bucket, k8s/overlays/k3s/backups.yaml): the EKS database is
+# restored from it and keeps replaying it while k3s is the primary. Read through the Pod Identity role, which may read
+# storefront-db/ but not write it (terraform/aws/eks/platform.tf). No retention policy: k3s prunes its own archive.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: k3s-archive
+  namespace: storefront
+spec:
+  configuration:
+    destinationPath: s3://storefront-k3s-backups-675901257165/storefront-db
+    s3Credentials:
+      inheritFromIAMRole: true

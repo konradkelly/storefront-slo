@@ -51,7 +51,8 @@ resource "aws_eks_pod_identity_association" "lbc" {
 # key in a Secret (terraform/aws/k3s/backups.tf). Here CloudNativePG's pods run as the service account named after the
 # Cluster, and Pod Identity gives them this role's short-lived credentials (inheritFromIAMRole, k8s/overlays/eks).
 #
-# Writes only under eks/, so the EKS database can never touch the k3s archive (storefront-db/). HeadBucket, which
+# Writes only under eks/, so the EKS database can never change the k3s archive (storefront-db/). It may read that
+# archive: the EKS database is restored from it and replays it as k3s's replica (k8s/overlays/eks). HeadBucket, which
 # Barman calls first, needs s3:ListBucket on the whole bucket.
 resource "aws_iam_role" "backups" {
   name               = "${var.cluster_name}-backups"
@@ -73,6 +74,11 @@ resource "aws_iam_role_policy" "backups" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = "${local.backup_bucket_arn}/eks/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${local.backup_bucket_arn}/storefront-db/*"
       },
     ]
   })
