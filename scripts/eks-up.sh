@@ -77,7 +77,7 @@ else
   k create namespace storefront --dry-run=client -o yaml | k apply -f - >/dev/null
   # The values pass through as base64, never decoded or printed.
   k3s -n storefront get secret storefront-db-app -o go-template='{{.data.username}} {{.data.password}}' |
-    { read -r u p
+    { read -r u p || true # the template prints no newline, so read returns 1 though it read both
       printf '{"apiVersion":"v1","kind":"Secret","type":"kubernetes.io/basic-auth",%s,"data":{"username":"%s","password":"%s"}}' \
         '"metadata":{"name":"storefront-db-app","namespace":"storefront"}' "$u" "$p" | k apply -f - >/dev/null; }
   echo "Copied the app's database credentials from k3s"
