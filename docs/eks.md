@@ -8,7 +8,7 @@ run myself"). It's being built in slices, each working before the next
 2. **The platform**: Argo CD and `k8s/platform` on EKS, Envoy Gateway behind a Network Load Balancer, Postgres on
    EBS, backups through Pod Identity instead of a static key. *Done, checked on 2026-11-21 (below).*
 3. **The database**: the EKS database as a replica of the k3s database through their S3 archives, and a switchover
-   rehearsal both ways. *Written; not yet applied.*
+   rehearsal both ways. *Done, checked on 2026-11-25 (below).*
 4. External Secrets, for the Secrets `make up` still creates from local files.
 5. The cutover: a domain, weighted DNS (10% → 50% → 100%), then the zone-failure experiment.
 
@@ -99,6 +99,7 @@ through the server's Elastic IP, losing a node or a zone now only removes its ta
 | `loadBalancerSourceRanges`: your IP only | As on k3s, where the security group admitted only `admin_cidrs`. The controller turns it into the NLB's security group rules. |
 | The controller's own Gateway API support off | Envoy Gateway owns the Gateway resources here. |
 | The controller's Service webhook off | Its `failurePolicy` is `Fail`, so while the controller was down no Service could be created anywhere in the cluster. The Gateway's Service names its load balancer class itself. |
+| The webhooks' certificate from cert-manager | Otherwise the chart makes a new CA on every render, and Argo CD renders it again and again. On 2026-11-25 the webhooks trusted one CA while the controller served another's certificate, every TargetGroupBinding failed x509 verification, and the NLB was never made. |
 | Envoy pods spread across zones, preferably | Losing a zone leaves one Envoy. Preferred, not required, so a replacement still starts while a zone is down. |
 
 **Storage.** The default StorageClass is gp3 on EBS (`k8s/cluster/eks/storageclass.yaml`), with
@@ -241,3 +242,29 @@ permissions, in the order above:
 
 That's all 46 resources. Afterwards AWS had no load balancer, target group, security group, network interface or
 volume from the cluster left, and nothing else from slice 1's list. The `eks/` archive in S3 stayed.
+
+## Slice 3 checked on 2026-11-25
+
+Both clusters ran from `feat/eks-database`: k3s's database restored from its archive, then EKS's restored from
+k3s's. Two fixes first: `eks-up.sh` exited silently while copying the app Secret, and the load balancer controller's
+webhook certificate needed cert-manager (above).
+
+Before the switchover the two databases had the same system identifier, and EKS had replayed to k3s's exact WAL
+position (`0/70000000`), with 3,885 orders on each.
+
+| | k3s → EKS | EKS → k3s |
+|---|---|---|
+| Replica caught up before the demotion | 3 s | 8 s |
+| Writes stopped (demotion to promotion) | 34 s | 29 s |
+| Data on both sides | identical: every row, hashed | identical |
+| Base backup on the new timeline | 14 s | 18 s |
+| Old primary replaying the new one's archive | 7 s | 3 s |
+
+- **The app:** its open connections wrote again after promotion, with no restart. The old side's app logged
+  read-only errors only while its database was demoted: the k3s app from 21:12:33 to 21:14:33 UTC, inside the
+  21:11:54–21:14:55 window.
+- **The restart:** CloudNativePG restarted the new primary's Postgres about 50 s after promoting it, which broke the
+  script's first run at its last check. The script now waits for the new primary to accept connections.
+- **Afterwards:** both Clusters were back to what git says (k3s primary), with no override left on either storefront
+  Application.
+

@@ -61,7 +61,7 @@ is_replica() { [ "$(in_recovery "$1")" = t ]; }
 demotion_token() { kc "$1" -n storefront get cluster storefront-db -o jsonpath='{.status.demotionToken}'; }
 has_token() { [ -n "$(demotion_token "$1")" ]; }
 backup_done() { [ "$(kc "$1" -n storefront get backup "$2" -o jsonpath='{.status.phase}')" = completed ]; }
-timeline() { sql "$1" 'select substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8)::bit(32)::int'; }
+timeline() { sql "$1" "select ('x' || substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8))::bit(32)::int"; }
 
 # Every row of every table, hashed, so equal means the same data, not only the same counts.
 fingerprint() {
@@ -156,6 +156,9 @@ EOF
 wait_for 900 "backup $backup completed" backup_done "$to" "$backup"
 
 say "Checking $from now follows $to"
+# CloudNativePG restarts the new primary once, a few seconds after promotion (2026-11-25: 50 s after).
+sleep 30
+wait_for 300 "$to accepting connections" is_primary "$to"
 lsn=$(sql "$to" 'select pg_current_wal_lsn()')
 sql "$to" 'select pg_switch_wal()' >/dev/null
 wait_for 900 "$from replayed past $lsn from $to's archive" replayed_past "$from" "$lsn"
