@@ -3,6 +3,7 @@
 # backs up to S3 with Pod Identity instead of a static key, and Prometheus labels what it sends with eks-aws.
 storefrontPath: k8s/overlays/eks
 clusterConfigPath: k8s/cluster/eks
+secretsConfigPath: k8s/cluster/eks-secrets
 
 charts:
   kube-prometheus-stack:
@@ -12,4 +13,6 @@ charts:
   plugin-barman-cloud:
     enabled: true
   aws-load-balancer-controller:
+    enabled: true
+  external-secrets:
     enabled: true

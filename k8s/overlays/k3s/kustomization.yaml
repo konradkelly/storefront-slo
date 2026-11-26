@@ -41,6 +41,13 @@ patches:
             isWALArchiver: true
             parameters:
               barmanObjectName: storefront-backups
+        # The app user's password from Parameter Store, the same one EKS's database gets (k8s/overlays/eks/
+        # db-app-secret.yaml), so either database accepts the app after a switchover. scripts/k3s-up.sh creates
+        # the Secret before the database exists.
+        bootstrap:
+          initdb:
+            secret:
+              name: storefront-db-app
         replica:
           self: k3s
           primary: k3s

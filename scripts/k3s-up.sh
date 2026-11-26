@@ -10,7 +10,8 @@
 # `make down` (scripts/k3s-down.sh) stops that, and .github/workflows/k3s-nightly-destroy.yml runs it every night in
 # case you forget. Only the backup bucket stays, at under a cent a month.
 #
-# Needs: terraform >= 1.10, aws CLI (logged in), kubectl, curl.
+# Needs: terraform >= 1.10, aws CLI (logged in), kubectl, curl, and the secrets in Parameter Store (run
+# bash scripts/secrets-push.sh once).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -52,9 +53,8 @@ until [ "$(k get nodes --no-headers 2>/dev/null | wc -l)" -ge 3 ]; do sleep 5; d
 k wait --for=condition=Ready nodes --all --timeout=600s
 k get nodes -L topology.kubernetes.io/zone
 
-step "Secrets (the only cluster state that isn't in git)"
-create_slack_secret
-create_grafana_cloud_secret # sets gc_url
+step "Secrets (the only cluster state that isn't in git), from Parameter Store"
+create_secrets_from_parameter_store # sets gc_url; the values: scripts/secrets-push.sh
 # S3 credentials for Postgres backups (k8s/overlays/k3s/backups.yaml) and the hourly Grafana snapshots
 # (k8s/monitoring/grafana-snapshots.yaml).
 k apply -f k8s/base/namespace.yaml # with its Pod Security labels; Argo CD adopts it

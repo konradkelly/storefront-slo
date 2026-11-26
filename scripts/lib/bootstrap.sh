@@ -1,8 +1,8 @@
 #!/bin/bash
 # What kind-up.sh and k3s-up.sh still do themselves before Argo CD takes over (scripts/argocd-up.sh). Everything
-# else, from monitoring to the storefront, is in git (k8s/platform). What's left is what can't be in git: Secrets
-# made from local files, until External Secrets in Phase 4b. Sourced after CTX (the kubeconfig context) is set;
-# every call names that context, so other clusters are never touched.
+# else, from monitoring to the storefront, is in git (k8s/platform). What's left is what can't be in git: Secrets,
+# from local files (kind) or Parameter Store (k3s; EKS has External Secrets for them). Sourced after CTX (the
+# kubeconfig context) is set; every call names that context, so other clusters are never touched.
 #
 # Run from the repo root.
 
@@ -25,24 +25,37 @@ create_slack_secret() {
   k -n monitoring create secret generic alertmanager-slack "${secret_args[@]}" --dry-run=client -o yaml | k apply -f -
 }
 
-# k3s and EKS: Grafana Cloud remote write keeps a curated set of metrics after the cluster is gone
-# (k8s/platform/files/kps-remote-write.yaml). Sets gc_url, which argocd-up.sh passes on as GRAFANA_CLOUD_URL; empty
-# when k8s/monitoring/secrets/grafana-cloud.env doesn't exist.
-create_grafana_cloud_secret() {
-  local gc_env=k8s/monitoring/secrets/grafana-cloud.env gc_user gc_token gc_creds
-  gc_url=
-  if [ -s "$gc_env" ]; then
-    gc() { sed -n "s/^$1=//p" "$gc_env" | tr -d '\r' | tail -1; }
-    gc_url=$(gc GRAFANA_CLOUD_PROM_URL) gc_user=$(gc GRAFANA_CLOUD_PROM_USER) gc_token=$(gc GRAFANA_CLOUD_TOKEN)
-    [ -n "$gc_url" ] && [ -n "$gc_user" ] && [ -n "$gc_token" ] || { echo "$gc_env needs GRAFANA_CLOUD_PROM_URL, _USER and _TOKEN"; exit 1; }
-    gc_creds=$(mktemp)
-    (umask 077 && printf 'username=%s\npassword=%s\n' "$gc_user" "$gc_token" > "$gc_creds")
-    k -n monitoring create secret generic grafana-cloud --from-env-file="$gc_creds" --dry-run=client -o yaml | k apply -f -
-    rm -f "$gc_creds"
-    echo "Sending curated metrics to $gc_url"
-  else
-    echo "No $gc_env: metrics stay in the cluster and are gone after it (see k8s/monitoring/secrets/README.md)"
-  fi
+# k3s: the Secrets that External Secrets makes on EKS (k8s/cluster/eks-secrets, k8s/overlays/eks/db-app-secret.yaml),
+# from the same Parameter Store values (scripts/secrets-push.sh), read with the AWS login of whoever runs make up.
+#   alertmanager-slack   the Slack webhooks, mounted by alertmanagerSpec.secrets (k8s/monitoring/kps-values.yaml)
+#   grafana-cloud        remote write of a curated set of metrics (k8s/platform/files/kps-remote-write.yaml)
+#   storefront-db-app    the database app user, the same password as EKS's database (k8s/overlays/k3s)
+# Sets gc_url, which argocd-up.sh passes on as GRAFANA_CLOUD_URL. Values pass through files in a 0700 directory, never
+# command lines, and are never printed.
+create_secrets_from_parameter_store() {
+  local dir native
+  dir=$(mktemp -d)
+  chmod 700 "$dir"
+  native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }
+  # param <name under /storefront/> <file>. MSYS_NO_PATHCONV: Git Bash would rewrite /storefront/... as a path.
+  param() {
+    MSYS_NO_PATHCONV=1 aws ssm get-parameter --with-decryption --name "/storefront/$1" \
+      --query Parameter.Value --output text 2>/dev/null | tr -d '\r\n' > "$dir/$2" || true
+    [ -s "$dir/$2" ] || { rm -rf "$dir"; echo "Parameter /storefront/$1 is missing: run bash scripts/secrets-push.sh" >&2; exit 1; }
+  }
+  param slack/page-url page; param slack/ticket-url ticket
+  param grafana-cloud/url url; param grafana-cloud/user user; param grafana-cloud/token token
+  param db/app-password db
+  for ns in monitoring storefront; do k create namespace "$ns" --dry-run=client -o yaml | k apply -f - >/dev/null; done
+  k -n monitoring create secret generic alertmanager-slack --from-file=slack-page-url="$(native "$dir/page")" \
+    --from-file=slack-ticket-url="$(native "$dir/ticket")" --dry-run=client -o yaml | k apply -f -
+  k -n monitoring create secret generic grafana-cloud --from-file=username="$(native "$dir/user")" \
+    --from-file=password="$(native "$dir/token")" --dry-run=client -o yaml | k apply -f -
+  k -n storefront create secret generic storefront-db-app --type=kubernetes.io/basic-auth \
+    --from-literal=username=storefront --from-file=password="$(native "$dir/db")" --dry-run=client -o yaml | k apply -f -
+  gc_url=$(cat "$dir/url")
+  rm -rf "$dir"
+  echo "Sending curated metrics to $gc_url"
 }
 
 # kind only: a pull-through cache per registry, so a rebuilt cluster pulls ~4 GB of images from local disk instead of

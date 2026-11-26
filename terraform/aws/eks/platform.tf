@@ -90,3 +90,36 @@ resource "aws_eks_pod_identity_association" "backups" {
   service_account = "storefront-db" # CloudNativePG names it after the Cluster (k8s/base/postgres.yaml)
   role_arn        = aws_iam_role.backups.arn
 }
+
+# --- External Secrets ------------------------------------------------------------------------------------------------
+
+# External Secrets (k8s/platform, values-eks.yaml) reads the parameters under /storefront/ in Parameter Store and turns
+# them into Kubernetes Secrets: the Slack webhooks, the Grafana Cloud token, the database app password. scripts/
+# secrets-push.sh puts them there, so the values are in neither git nor Terraform state.
+#
+# Read-only, and only /storefront/. SecureString parameters use the AWS-managed aws/ssm key, whose key policy lets any
+# principal in the account decrypt through Parameter Store, so no kms:Decrypt here.
+resource "aws_iam_role" "external_secrets" {
+  name               = "${var.cluster_name}-external-secrets"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+}
+
+resource "aws_iam_role_policy" "external_secrets" {
+  name = "read-storefront-parameters"
+  role = aws_iam_role.external_secrets.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
+      Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/storefront/*"
+    }]
+  })
+}
+
+resource "aws_eks_pod_identity_association" "external_secrets" {
+  cluster_name    = aws_eks_cluster.main.name
+  namespace       = "external-secrets"
+  service_account = "external-secrets" # the chart's controller, named after the release (k8s/platform/values.yaml)
+  role_arn        = aws_iam_role.external_secrets.arn
+}

@@ -9,7 +9,8 @@ run myself"). It's being built in slices, each working before the next
    EBS, backups through Pod Identity instead of a static key. *Done, checked on 2026-11-21 (below).*
 3. **The database**: the EKS database as a replica of the k3s database through their S3 archives, and a switchover
    rehearsal both ways. *Done, checked on 2026-11-25 (below).*
-4. External Secrets, for the Secrets `make up` still creates from local files.
+4. **Secrets**: Parameter Store as the one source for the Slack webhooks, the Grafana Cloud token and the database
+   password, turned into Secrets by External Secrets on EKS and by `make up` on k3s. *Written; not yet applied.*
 5. The cutover: a domain, weighted DNS (10% → 50% → 100%), then the zone-failure experiment.
 
 ```
@@ -29,7 +30,8 @@ forgotten cluster keeps running:
 
 ```bash
 terraform -chdir=terraform/aws/bootstrap apply
-make up          # k3s first: the EKS database is restored from k3s's archive, and the app needs k3s's password
+bash scripts/secrets-push.sh   # once, and after changing a local secret file: the values into Parameter Store
+make up          # k3s first, once: the EKS database is restored from k3s's archive
 make eks-up      # the cluster (15-20 minutes), then Argo CD installs the platform (10-30 more)
 bash scripts/db-switchover.sh eks   # make the EKS database the primary; `... k3s` switches back
 make eks-down    # about 15 minutes
@@ -130,13 +132,13 @@ The clusters never connect to each other: all replication goes through S3.
          Postgres <-replay-- s3://…/eks/        <--WAL--    Postgres
 ```
 
-- **Bootstrap.** `make eks-up` needs k3s up first. It checks that k3s's archive has a completed base backup, copies
-  k3s's `storefront-db-app` Secret, and creates the EKS database by restoring that backup
+- **Bootstrap.** `make eks-up` needs k3s's archive, not k3s itself. It checks that the archive has a completed base
+  backup, and the EKS database is created by restoring that backup
   (`k8s/overlays/eks`). Restoring keeps the system identifier, which the switchover checks. The EKS backup role
   may read `storefront-db/` but write only `eks/`.
 - **The password.** The roles are replicated, so the EKS app has to log in with k3s's password, and CloudNativePG
-  sets the app user's password from the Secret at promotion. So the Secret is a copy; External Secrets replaces the
-  copy in slice 4.
+  sets the app user's password from the Secret at promotion. So both clusters' `storefront-db-app` comes from the same
+  parameter (slice 4, below).
 - **Lag.** WAL reaches S3 when a segment closes: when it fills, or after `archive_timeout`, which is 5 minutes. So
   the replica can be up to about 5 minutes behind while the primary is idle. The switchover doesn't lose those
   minutes; it waits for them.
@@ -163,6 +165,34 @@ written while EKS was the primary.
 
 The app's traffic doesn't move here: each cluster's app uses its own database, so after a switchover the old side's
 writes fail. Moving traffic is the cutover's DNS step (slice 5).
+
+## Secrets (slice 4)
+
+The values that can't be in git live in Parameter Store, under `/storefront/`. Standard parameters are free;
+SecureString ones are encrypted with the AWS-managed `aws/ssm` key.
+
+| Parameter | Becomes | Used by |
+|-----------|---------|---------|
+| `slack/page-url`, `slack/ticket-url` | `monitoring/alertmanager-slack` | Alertmanager's Slack receivers |
+| `grafana-cloud/url` (plain), `grafana-cloud/user`, `grafana-cloud/token` | `monitoring/grafana-cloud` | Prometheus's remote write |
+| `db/app-password` | `storefront/storefront-db-app` | the app, and both databases' owner role |
+
+- **Putting them there:** [scripts/secrets-push.sh](../scripts/secrets-push.sh) reads the gitignored local files
+  (`alertmanager/secrets/`, `k8s/monitoring/secrets/grafana-cloud.env`) and generates the database password once.
+  Values go to AWS in a request body from a 0600 file, never on a command line, and are never printed. They're in
+  neither git nor Terraform state.
+- **EKS:** External Secrets (wave -4) reads them with a Pod Identity role that may only read `/storefront/*`
+  (`terraform/aws/eks/platform.tf`). The two monitoring Secrets come from `k8s/cluster/eks-secrets`, synced at wave
+  -3 by its own Application because Alertmanager and Prometheus need them in that wave. The database's comes from
+  `k8s/overlays/eks/db-app-secret.yaml`, a wave ahead of the Cluster. External Secrets rereads them hourly.
+- **k3s:** pods there have no AWS identity, so `make up` reads the same parameters with your AWS login and creates
+  the same three Secrets. That costs no new access key, and k3s goes away after the cutover.
+- **kind** still reads `alertmanager/secrets/` directly: it may run with no AWS login at all.
+
+**The database password** is generated once and never overwritten, because a database restored from the archive
+keeps the role's old password until CloudNativePG sets it again at bootstrap or promotion. Both overlays name
+`storefront-db-app` in their bootstrap, so every new database (initdb or restore) takes the parameter's value.
+Rotating it isn't scripted or tested yet.
 
 ## What `make eks-down` cleans up
 

@@ -23,10 +23,12 @@ patches:
         value:
           recovery:
             source: previous
-            # The app's credentials Secret (storefront-db-app) is new, and CloudNativePG sets the restored owner's
-            # password to match it.
+            # CloudNativePG sets the restored owner's password from this Secret, which scripts/k3s-up.sh creates from
+            # Parameter Store (k8s/overlays/k3s).
             database: storefront
             owner: storefront
+            secret:
+              name: storefront-db-app
       # Appended to the k3s overlay's two (the k3s and EKS archives).
       - op: add
         path: /spec/externalClusters/-

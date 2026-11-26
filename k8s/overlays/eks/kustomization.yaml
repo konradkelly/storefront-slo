@@ -16,6 +16,7 @@ kind: Kustomization
 resources:
   - ../k3s
   - k3s-archive.yaml
+  - db-app-secret.yaml
   - pod-identity-netpol.yaml
 
 patches:
@@ -53,9 +54,9 @@ patches:
             source: k3s
             database: storefront
             owner: storefront
-            # The roles are k3s's, replicated, so the app must log in with k3s's password. scripts/eks-up.sh copies
-            # k3s's Secret here before the database exists. At promotion CloudNativePG sets the app user's password
-            # from this Secret, which is why it must be the same one (External Secrets replaces the copy, slice 4).
+            # The roles are k3s's, replicated, so the app must log in with k3s's password: both clusters' Secret comes
+            # from the same parameter (db-app-secret.yaml here, k3s-up.sh on k3s). At promotion CloudNativePG sets the
+            # app user's password from this Secret.
             secret:
               name: storefront-db-app
       - op: replace

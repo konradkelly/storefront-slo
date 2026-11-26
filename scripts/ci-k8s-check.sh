@@ -24,7 +24,7 @@ helm template platform k8s/platform -f k8s/platform/values-eks.yaml \
   --set domain=203.0.113.20.sslip.io --set grafanaCloudUrl=https://example.invalid/api/prom/push \
   --set vpcId=vpc-0123456789abcdef0 --set 'nlbEipAllocations=eipalloc-1\,eipalloc-2\,eipalloc-3' \
   --set 'adminCidrs={198.51.100.7/32}' > "$render_dir/platform-eks.yaml"
-for d in monitoring kind k3s eks; do
+for d in monitoring kind k3s eks eks-secrets; do
   kubectl kustomize --load-restrictor LoadRestrictionsNone "k8s/cluster/$d" > "$render_dir/cluster-$d.yaml"
 done
 

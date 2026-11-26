@@ -19,11 +19,14 @@ adminCidrs: []
 # The storefront app (an overlay of k8s/base) and the cluster's own manifests (k8s/cluster/<cluster>).
 storefrontPath: k8s/overlays/kind-gitops
 clusterConfigPath: k8s/cluster/kind
+# EKS only: the Secrets External Secrets makes, synced at wave -3 (templates/cluster-config.yaml). Empty: no such app.
+secretsConfigPath: ""
 
 # Helm charts, one Application each, in sync-wave order: Argo CD applies a wave only once every app in the waves
 # before it is Healthy. So operators come up before anything that needs their CRDs or webhooks:
-#   -4 monitoring-config (the Alertmanager config Secret must exist before Alertmanager starts)
-#   -3 kube-prometheus-stack (ServiceMonitor/PodMonitor CRDs, which the other charts create), cert-manager
+#   -4 monitoring-config (the Alertmanager config Secret must exist before Alertmanager starts), External Secrets (EKS)
+#   -3 kube-prometheus-stack (ServiceMonitor/PodMonitor CRDs, which the other charts create), cert-manager,
+#      secrets-config (EKS: the Secrets Alertmanager and Prometheus need)
 #   -2 the other operators (Argo Rollouts among them)
 #   -1 cluster-config (Gateway, routes, Probe), blackbox-exporter
 #    0 the storefront
@@ -103,6 +106,18 @@ charts:
     release: barman-cloud
     namespace: cnpg-system
     wave: -2
+  # EKS: Kubernetes Secrets from Parameter Store (/storefront/, put there by scripts/secrets-push.sh), read through Pod
+  # Identity (terraform/aws/eks/platform.tf). Wave -4, before kube-prometheus-stack: Alertmanager and Prometheus need
+  # two of those Secrets, which secretsConfigPath's app (wave -3) asks for. The release name is the controller's
+  # service account name, which the Pod Identity association names.
+  external-secrets:
+    enabled: false
+    repo: https://charts.external-secrets.io
+    version: 2.15.0
+    release: external-secrets
+    namespace: external-secrets
+    wave: -4
+    values: [k8s/monitoring/external-secrets-values.yaml]
   # EKS: turns the Gateway's LoadBalancer Service into a Network Load Balancer (k8s/gateway/gateway-eks.yaml). Wave -2,
   # so it runs before cluster-config creates the Gateway. Its IAM policy is pinned with it (terraform/aws/eks).
   aws-load-balancer-controller:
