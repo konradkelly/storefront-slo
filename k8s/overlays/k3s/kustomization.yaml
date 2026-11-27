@@ -73,4 +73,4 @@ patches:
 images:
   - name: storefront-api
     newName: ghcr.io/konradkelly/storefront-slo
-    digest: sha256:a06f0ceb9d12fc784fb965aac4cca24b27be9e924f9ae1f5860858db08c4a89f
+    digest: sha256:4f78bcd2c2c2e954649dd231f67fbdc4fb7001a928343b5bbceb87c084471298
