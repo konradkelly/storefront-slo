@@ -1,0 +1,9 @@
+# The Secrets External Secrets makes from Parameter Store on EKS, synced by the secrets-config Application at wave -3
+# (k8s/platform/templates/cluster-config.yaml), before Alertmanager and Prometheus need them. The database password's
+# ExternalSecret is in k8s/overlays/eks, with the database. scripts/secrets-push.sh puts the values in Parameter Store.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - parameter-store.yaml
+  - monitoring-secrets.yaml

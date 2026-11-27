@@ -634,7 +634,7 @@ each self-managed piece with the managed equivalent.
 | EC2 agents in Terraform | **Managed node group**, one node per zone. Karpenter later, for the zone-failure experiment. |
 | Zone labels from user_data | Set by the cloud provider |
 | A static IAM access key for backups | **EKS Pod Identity**, one role per workload |
-| Secrets created by `make up` from local files | **External Secrets Operator** + AWS Secrets Manager |
+| Secrets created by `make up` from local files | **External Secrets Operator** + Parameter Store (free, unlike Secrets Manager) |
 | ServiceLB in front of Envoy Gateway | **AWS Load Balancer Controller**: a Network Load Balancer in front of the same Envoy Gateway |
 | local-path storage | **EBS CSI driver** with gp3 volumes |
 | CloudNativePG on node disk | **CloudNativePG on EBS**. RDS later, as a write-up or experiment. |
@@ -685,7 +685,13 @@ Details are in [eks.md](eks.md).
       - writes stopped for 34 s from k3s to EKS, and 29 s back;
       - identical data on both sides each time;
       - the old primary followed the new one within 7 s.
-- [ ] **Slice 4:** External Secrets.
+- [x] **Slice 4, secrets:** Parameter Store as the one source. External Secrets makes the Secrets on EKS through
+      Pod Identity; `make up` reads the same values for k3s. `scripts/secrets-push.sh` puts them there.
+
+      Checked on 2026-11-26 ([eks.md](eks.md#slice-4-checked-on-2026-11-26)):
+      - External Secrets authenticated through Pod Identity, and all three Secrets synced;
+      - both apps logged in with the one password;
+      - the EKS app wrote after promotion, and k3s read that row after switching back.
 - [ ] **RDS** as a separate write-up or experiment, after the cutover.
 - [ ] **Cutover plan.** Run both clusters side by side. Argo CD syncs both. Restore the latest CNPG backup
       into the new database, switch writes during a short freeze, and move traffic through weighted DNS

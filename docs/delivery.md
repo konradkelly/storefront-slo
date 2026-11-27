@@ -112,8 +112,9 @@ delete the database. Its project only reaches the storefront namespace, while `p
 can edit those Applications is a cluster admin. KEDA owns the API's replica count and Argo Rollouts the HTTPRoute's
 weights; Argo CD ignores both.
 
-What isn't in git: the Secrets made from local files (Slack webhook URLs, S3 and Grafana Cloud credentials), until
-External Secrets in Phase 4b, and the root Application itself, which says which cluster this is. Argo CD doesn't
+What isn't in git: the Secrets' values (Slack webhook URLs, Grafana Cloud and database credentials), which live in
+Parameter Store (External Secrets on EKS, `make up` on k3s, local files on kind; docs/eks.md, "Secrets"), k3s's S3
+key, and the root Application itself, which says which cluster this is. Argo CD doesn't
 manage its own installation either; `argocd-up.sh` applies the pinned upstream manifest.
 
 ## Canary releases

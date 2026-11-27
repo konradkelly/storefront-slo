@@ -20,6 +20,31 @@ spec:
     namespace: monitoring
   syncPolicy:
     {{- include "platform.syncPolicy" . | nindent 4 }}
+{{- if .Values.secretsConfigPath }}
+---
+# The Secrets External Secrets makes from Parameter Store (EKS). Wave -3, with kube-prometheus-stack, after the
+# External Secrets operator (wave -4): Alertmanager mounts alertmanager-slack and Prometheus's remote write reads
+# grafana-cloud, so they have to exist before that wave can be Healthy, and cluster-config (wave -1) is too late.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: secrets-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.revision }}
+    path: {{ .Values.secretsConfigPath }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    {{- include "platform.syncPolicy" . | nindent 4 }}
+{{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application

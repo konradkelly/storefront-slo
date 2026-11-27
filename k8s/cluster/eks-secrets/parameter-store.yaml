@@ -1,0 +1,11 @@
+# Parameter Store in this account and region. No auth: External Secrets uses its controller's own credentials, which
+# Pod Identity gives it (terraform/aws/eks/platform.tf: read-only, /storefront/* only).
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: parameter-store
+spec:
+  provider:
+    aws:
+      service: ParameterStore
+      region: us-east-1

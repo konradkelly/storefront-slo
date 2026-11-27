@@ -64,9 +64,9 @@ Phase 4b moves the nodes into private subnets.
 
 ## Keeping the data
 
-In-cluster Prometheus stores to an `emptyDir`, so `make down` deletes every metric. With
-`k8s/monitoring/secrets/grafana-cloud.env` present (setup: [k8s/monitoring/secrets/README.md](../k8s/monitoring/secrets/README.md)),
-`make up` also copies a curated subset to Grafana Cloud's free tier: the SLO results, request and payment
+In-cluster Prometheus stores to an `emptyDir`, so `make down` deletes every metric. With the Grafana Cloud
+credentials in Parameter Store (setup: [k8s/monitoring/secrets/README.md](../k8s/monitoring/secrets/README.md), then
+`scripts/secrets-push.sh`), `make up` also copies a curated subset to Grafana Cloud's free tier: the SLO results, request and payment
 latency, checkouts, pool usage, restarts, node memory/disk/CPU, and Postgres archiving
 ([kps-remote-write.yaml](../k8s/platform/files/kps-remote-write.yaml)). Those series outlive the cluster (14 days on
 the free tier), are labeled `cluster="k3s-aws"`, and the committed dashboards import directly. Screenshot or
