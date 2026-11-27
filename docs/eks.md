@@ -10,7 +10,8 @@ run myself"). It's being built in slices, each working before the next
 3. **The database**: the EKS database as a replica of the k3s database through their S3 archives, and a switchover
    rehearsal both ways. *Done, checked on 2026-11-25 (below).*
 4. **Secrets**: Parameter Store as the one source for the Slack webhooks, the Grafana Cloud token and the database
-   password, turned into Secrets by External Secrets on EKS and by `make up` on k3s. *Written; not yet applied.*
+   password, turned into Secrets by External Secrets on EKS and by `make up` on k3s. *Done, checked on 2026-11-26
+   (below).*
 5. The cutover: a domain, weighted DNS (10% → 50% → 100%), then the zone-failure experiment.
 
 ```
@@ -297,4 +298,20 @@ position (`0/70000000`), with 3,885 orders on each.
   script's first run at its last check. The script now waits for the new primary to accept connections.
 - **Afterwards:** both Clusters were back to what git says (k3s primary), with no override left on either storefront
   Application.
+
+## Slice 4 checked on 2026-11-26
+
+`scripts/secrets-push.sh` put the six parameters in Parameter Store. Then both clusters ran from `feat/eks-secrets`:
+k3s first, whose restore set the app password from the parameter, then EKS.
+
+- **External Secrets:** the ClusterSecretStore was Valid, so authentication through Pod Identity with no `auth`
+  block worked. All three ExternalSecrets were `SecretSynced`, and Argo CD had every app Synced and Healthy,
+  including `secrets-config` at wave -3.
+- **The shared password:** both apps were ready. The EKS one logged in to a replica of k3s's database, which proves
+  the password k3s's restore set is the one External Secrets gave EKS. The apps' startup restarts were all
+  "connection refused" while Postgres started, never an authentication failure.
+- **Switchover with it:** k3s → EKS stopped writes for 26 s, and EKS → k3s for 29 s, with identical data each time.
+  After the promotion, when CloudNativePG resets the app password from the Secret, a cart item written through the
+  EKS app's API returned 201. After switching back, k3s read that row and took a new write. No override was left
+  on either cluster.
 
